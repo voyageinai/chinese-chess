@@ -155,71 +155,109 @@ export default function GamePage({
     void loadSnapshot(true);
   }, [loadSnapshot]);
 
-  // WebSocket for live updates
+  // WebSocket for live updates with auto-reconnect
   const canSubscribe = !loading && !!game && !game.result;
   useEffect(() => {
     if (!canSubscribe) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    let disposed = false;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectDelay = 1000; // start at 1s, exponential backoff up to 10s
+    const MAX_RECONNECT_DELAY = 10_000;
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "subscribe", gameId: id }));
-      requestResync();
-    };
+    function connect() {
+      if (disposed) return;
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "game_start" && msg.gameId === id) {
-        setClock(msg.redTime, msg.blackTime);
-        setActiveSide("red");
-      }
-      if (msg.type === "move" && msg.gameId === id) {
-        const currentPly = movesRef.current.length;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
-        if (msg.ply <= currentPly) {
-          return;
+      ws.onopen = () => {
+        console.log("[ws] connected");
+        reconnectDelay = 1000; // reset backoff on successful connect
+        ws!.send(JSON.stringify({ type: "subscribe", gameId: id }));
+        requestResync();
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "game_start" && msg.gameId === id) {
+          setClock(msg.redTime, msg.blackTime);
+          setActiveSide("red");
         }
+        if (msg.type === "move" && msg.gameId === id) {
+          const currentPly = movesRef.current.length;
 
-        if (msg.ply > currentPly + 1) {
-          requestResync();
-          return;
+          if (msg.ply <= currentPly) {
+            return;
+          }
+
+          if (msg.ply > currentPly + 1) {
+            requestResync();
+            return;
+          }
+
+          const next = [
+            ...movesRef.current,
+            {
+              move: msg.move,
+              fen: msg.fen,
+              time_ms: msg.timeMs,
+              eval: msg.eval,
+            },
+          ];
+          movesRef.current = next;
+          setMoves(next);
+          setCurrentIndex(msg.ply - 1);
+
+          const nextSide = msg.ply % 2 === 0 ? "red" : "black";
+
+          // Compensate for network delay: the server included movedAt timestamp,
+          // so we know how stale the clock values are. Subtract the lag from
+          // the side that is NOW thinking (they've already been thinking for `lag` ms).
+          const lag = Math.max(0, Date.now() - msg.movedAt);
+          setClock(
+            nextSide === "red" ? msg.redTime - lag : msg.redTime,
+            nextSide === "black" ? msg.blackTime - lag : msg.blackTime,
+          );
+          setActiveSide(nextSide);
         }
+        if (msg.type === "game_end" && msg.gameId === id) {
+          setActiveSide(null);
+          setGame((prev) =>
+            prev ? { ...prev, result: msg.result } : prev,
+          );
+        }
+      };
 
-        const next = [
-          ...movesRef.current,
-          {
-            move: msg.move,
-            fen: msg.fen,
-            time_ms: msg.timeMs,
-            eval: msg.eval,
-          },
-        ];
-        movesRef.current = next;
-        setMoves(next);
-        setCurrentIndex(msg.ply - 1);
+      ws.onclose = () => {
+        if (disposed) return;
+        console.log(`[ws] disconnected, reconnecting in ${reconnectDelay}ms...`);
+        scheduleReconnect();
+      };
 
-        const nextSide = msg.ply % 2 === 0 ? "red" : "black";
+      ws.onerror = () => {
+        // onclose will fire after onerror, so just log here
+        console.warn("[ws] connection error");
+      };
+    }
 
-        // Compensate for network delay: the server included movedAt timestamp,
-        // so we know how stale the clock values are. Subtract the lag from
-        // the side that is NOW thinking (they've already been thinking for `lag` ms).
-        const lag = Math.max(0, Date.now() - msg.movedAt);
-        setClock(
-          nextSide === "red" ? msg.redTime - lag : msg.redTime,
-          nextSide === "black" ? msg.blackTime - lag : msg.blackTime,
-        );
-        setActiveSide(nextSide);
-      }
-      if (msg.type === "game_end" && msg.gameId === id) {
-        setActiveSide(null);
-        setGame((prev) =>
-          prev ? { ...prev, result: msg.result } : prev,
-        );
-      }
+    function scheduleReconnect() {
+      if (disposed || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
+        connect();
+      }, reconnectDelay);
+    }
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
     };
-
-    return () => ws.close();
   }, [canSubscribe, id, requestResync]);
 
   // --- requestAnimationFrame clock countdown ---
