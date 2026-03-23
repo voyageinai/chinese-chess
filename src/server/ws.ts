@@ -53,13 +53,17 @@ export class WsHub {
 
   broadcast(message: WsMessage): void {
     const data = JSON.stringify(message);
+    const delivered = new Set<WebSocket>();
 
     // Send to game-specific subscribers
     if ("gameId" in message) {
       const subscribers = this.gameSubscribers.get(message.gameId);
       if (subscribers) {
         for (const ws of subscribers) {
-          if (ws.readyState === WebSocket.OPEN) ws.send(data);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(data);
+            delivered.add(ws);
+          }
         }
       }
     }
@@ -67,6 +71,7 @@ export class WsHub {
     // Also broadcast to ALL connected clients (for live game list on home page)
     if (this.wss) {
       for (const ws of this.wss.clients) {
+        if (delivered.has(ws)) continue;
         if (ws.readyState === WebSocket.OPEN) ws.send(data);
       }
     }

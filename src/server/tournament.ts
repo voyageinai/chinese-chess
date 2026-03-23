@@ -119,8 +119,10 @@ export class TournamentRunner extends EventEmitter {
       const redEngine = engines.get(game.red_engine_id)!;
       const blackEngine = engines.get(game.black_engine_id)!;
 
-      // Mark game as started
-      queries.updateGameStarted(gameId);
+      const initialTimeMs = tournament.time_control_base * 1000;
+
+      // Mark game as started and persist initial clocks for live spectators.
+      queries.initializeGameStarted(gameId, initialTimeMs);
 
       // Emit game_start event
       this.emit("game_start", {
@@ -128,12 +130,14 @@ export class TournamentRunner extends EventEmitter {
         gameId,
         redEngine: redEngine.name,
         blackEngine: blackEngine.name,
+        redTime: initialTimeMs,
+        blackTime: initialTimeMs,
       });
 
       const matchConfig: MatchConfig = {
         redEnginePath: redEngine.binary_path,
         blackEnginePath: blackEngine.binary_path,
-        timeBase: tournament.time_control_base * 1000, // DB stores seconds, UCI needs ms
+        timeBase: initialTimeMs, // DB stores seconds, UCI needs ms
         timeInc: tournament.time_control_inc * 1000,
         gameId,
       };

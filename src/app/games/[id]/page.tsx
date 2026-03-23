@@ -45,6 +45,7 @@ export default function GamePage({
   const [currentIndex, setCurrentIndex] = useState(-1);
   // --- Clock state: refs are the source of truth, state is for rendering ---
   const clockRef = useRef({ red: 0, black: 0 });
+  const movesRef = useRef<StoredMove[]>([]);
   const [redTime, setRedTime] = useState(0);
   const [blackTime, setBlackTime] = useState(0);
   /** Which side is currently thinking (for live clock countdown), null = stopped */
@@ -54,13 +55,16 @@ export default function GamePage({
   const [error, setError] = useState<string | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number>(0);
+  const resyncPromiseRef = useRef<Promise<void> | null>(null);
 
   /** Update clock refs and sync to React state for display */
   function setClock(red: number, black: number) {
-    clockRef.current.red = red;
-    clockRef.current.black = black;
-    setRedTime(red);
-    setBlackTime(black);
+    const nextRed = Math.max(0, red);
+    const nextBlack = Math.max(0, black);
+    clockRef.current.red = nextRed;
+    clockRef.current.black = nextBlack;
+    setRedTime(nextRed);
+    setBlackTime(nextBlack);
   }
 
   function setActiveSide(side: "red" | "black" | null) {
@@ -69,91 +73,143 @@ export default function GamePage({
     forceRender((n) => n + 1);
   }
 
+  const applySnapshot = useCallback(
+    (data: {
+      game: Game;
+      redEngine: Engine | null;
+      blackEngine: Engine | null;
+    }) => {
+      const parsedMoves: StoredMove[] = JSON.parse(data.game.moves || "[]");
+
+      if (parsedMoves.length < movesRef.current.length) {
+        return;
+      }
+
+      setGame(data.game);
+      setRedEngine(data.redEngine);
+      setBlackEngine(data.blackEngine);
+      movesRef.current = parsedMoves;
+      setMoves(parsedMoves);
+      setCurrentIndex(parsedMoves.length - 1);
+
+      const rTime = data.game.red_time_left || 0;
+      const bTime = data.game.black_time_left || 0;
+
+      if (!data.game.result && data.game.started_at && parsedMoves.length > 0) {
+        // Late joiner: estimate how long the current engine has been thinking.
+        // DB times are from the last completed move; compute wall-clock elapsed since.
+        const totalMoveMs = parsedMoves.reduce(
+          (sum: number, m: StoredMove) => sum + (m.time_ms || 0),
+          0,
+        );
+        const wallElapsed = (Date.now() / 1000 - data.game.started_at) * 1000;
+        const thinkingElapsed = Math.max(0, wallElapsed - totalMoveMs);
+        const side = parsedMoves.length % 2 === 0 ? "red" : "black";
+        setClock(
+          side === "red" ? rTime - thinkingElapsed : rTime,
+          side === "black" ? bTime - thinkingElapsed : bTime,
+        );
+        setActiveSide(side);
+        return;
+      }
+
+      setClock(rTime, bTime);
+      if (!data.game.result && data.game.started_at) {
+        setActiveSide("red");
+      } else {
+        setActiveSide(null);
+      }
+    },
+    [],
+  );
+
+  const loadSnapshot = useCallback(
+    async (showSpinner: boolean) => {
+      if (showSpinner) setLoading(true);
+
+      try {
+        const response = await fetch(`/api/games/${id}`);
+        if (!response.ok) throw new Error("Game not found");
+        const data = await response.json();
+        applySnapshot(data);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Load failed");
+      } finally {
+        if (showSpinner) setLoading(false);
+      }
+    },
+    [applySnapshot, id],
+  );
+
+  const requestResync = useCallback(() => {
+    if (!resyncPromiseRef.current) {
+      resyncPromiseRef.current = loadSnapshot(false).finally(() => {
+        resyncPromiseRef.current = null;
+      });
+    }
+  }, [loadSnapshot]);
+
   // Fetch game data
   useEffect(() => {
-    fetch(`/api/games/${id}`)
-      .then((r) => {
-        if (!r.ok) throw new Error("Game not found");
-        return r.json();
-      })
-      .then((data) => {
-        setGame(data.game);
-        setRedEngine(data.redEngine);
-        setBlackEngine(data.blackEngine);
-        const parsedMoves: StoredMove[] = JSON.parse(
-          data.game.moves || "[]",
-        );
-        setMoves(parsedMoves);
-        setCurrentIndex(parsedMoves.length - 1);
-
-        const rTime = data.game.red_time_left || 0;
-        const bTime = data.game.black_time_left || 0;
-
-        if (!data.game.result && data.game.started_at && parsedMoves.length > 0) {
-          // Late joiner: estimate how long the current engine has been thinking.
-          // DB times are from the last completed move; compute wall-clock elapsed since.
-          const totalMoveMs = parsedMoves.reduce(
-            (sum: number, m: StoredMove) => sum + (m.time_ms || 0),
-            0,
-          );
-          const wallElapsed = (Date.now() / 1000 - data.game.started_at) * 1000;
-          const thinkingElapsed = Math.max(0, wallElapsed - totalMoveMs);
-          const side = parsedMoves.length % 2 === 0 ? "red" : "black";
-          setClock(
-            side === "red" ? rTime - thinkingElapsed : rTime,
-            side === "black" ? bTime - thinkingElapsed : bTime,
-          );
-          setActiveSide(side);
-        } else {
-          setClock(rTime, bTime);
-          if (!data.game.result && data.game.started_at) {
-            setActiveSide("red");
-          }
-        }
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, [id]);
+    void loadSnapshot(true);
+  }, [loadSnapshot]);
 
   // WebSocket for live updates
+  const canSubscribe = !loading && !!game && !game.result;
   useEffect(() => {
-    if (!game || game.result) return;
+    if (!canSubscribe) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "subscribe", gameId: id }));
+      requestResync();
     };
 
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === "game_start" && msg.gameId === id) {
+        setClock(msg.redTime, msg.blackTime);
         setActiveSide("red");
       }
       if (msg.type === "move" && msg.gameId === id) {
-        setMoves((prev) => {
-          const next = [
-            ...prev,
-            { move: msg.move, fen: msg.fen, time_ms: 0, eval: msg.eval },
-          ];
-          const nextSide = next.length % 2 === 0 ? "red" : "black";
+        const currentPly = movesRef.current.length;
 
-          // Compensate for network delay: the server included movedAt timestamp,
-          // so we know how stale the clock values are. Subtract the lag from
-          // the side that is NOW thinking (they've already been thinking for `lag` ms).
-          const lag = msg.movedAt ? Math.max(0, Date.now() - msg.movedAt) : 0;
-          setClock(
-            nextSide === "red" ? msg.redTime - lag : msg.redTime,
-            nextSide === "black" ? msg.blackTime - lag : msg.blackTime,
-          );
-          setActiveSide(nextSide);
-          return next;
-        });
-        setCurrentIndex((prev) => prev + 1);
+        if (msg.ply <= currentPly) {
+          return;
+        }
+
+        if (msg.ply > currentPly + 1) {
+          requestResync();
+          return;
+        }
+
+        const next = [
+          ...movesRef.current,
+          {
+            move: msg.move,
+            fen: msg.fen,
+            time_ms: msg.timeMs,
+            eval: msg.eval,
+          },
+        ];
+        movesRef.current = next;
+        setMoves(next);
+        setCurrentIndex(msg.ply - 1);
+
+        const nextSide = msg.ply % 2 === 0 ? "red" : "black";
+
+        // Compensate for network delay: the server included movedAt timestamp,
+        // so we know how stale the clock values are. Subtract the lag from
+        // the side that is NOW thinking (they've already been thinking for `lag` ms).
+        const lag = Math.max(0, Date.now() - msg.movedAt);
+        setClock(
+          nextSide === "red" ? msg.redTime - lag : msg.redTime,
+          nextSide === "black" ? msg.blackTime - lag : msg.blackTime,
+        );
+        setActiveSide(nextSide);
       }
       if (msg.type === "game_end" && msg.gameId === id) {
         setActiveSide(null);
@@ -164,7 +220,7 @@ export default function GamePage({
     };
 
     return () => ws.close();
-  }, [id, game?.result]);
+  }, [canSubscribe, id, requestResync]);
 
   // --- requestAnimationFrame clock countdown ---
   // Uses delta time for accuracy; caps at 200ms to handle tab backgrounding.

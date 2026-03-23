@@ -245,6 +245,13 @@ export function updateGameStarted(id: string): void {
   db.prepare("UPDATE games SET started_at = unixepoch() WHERE id = ?").run(id);
 }
 
+export function initializeGameStarted(id: string, timeBaseMs: number): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE games SET started_at = unixepoch(), red_time_left = ?, black_time_left = ? WHERE id = ?",
+  ).run(timeBaseMs, timeBaseMs, id);
+}
+
 export function resetGameStarted(id: string): void {
   const db = getDb();
   db.prepare("UPDATE games SET started_at = NULL WHERE id = ?").run(id);

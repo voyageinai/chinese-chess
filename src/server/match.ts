@@ -263,6 +263,8 @@ export class Match extends EventEmitter {
           eval: evalScore,
           redTime,
           blackTime,
+          timeMs: elapsed,
+          ply: storedMoves.length,
           movedAt: Date.now(),
         });
 

@@ -89,7 +89,25 @@ export interface Game {
 
 // -- WebSocket messages --
 export type WsMessage =
-  | { type: "move"; gameId: string; move: UciMove; fen: string; eval: number | null; redTime: number; blackTime: number }
-  | { type: "game_start"; gameId: string; redEngine: string; blackEngine: string }
+  | {
+      type: "move";
+      gameId: string;
+      move: UciMove;
+      fen: string;
+      eval: number | null;
+      redTime: number;
+      blackTime: number;
+      timeMs: number;
+      ply: number;
+      movedAt: number;
+    }
+  | {
+      type: "game_start";
+      gameId: string;
+      redEngine: string;
+      blackEngine: string;
+      redTime: number;
+      blackTime: number;
+    }
   | { type: "game_end"; gameId: string; result: "red" | "black" | "draw" }
   | { type: "tournament_end"; tournamentId: string };
