@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import React, { useMemo } from "react";
 import { parseFen } from "@/lib/fen";
 import { BOARD_COLS, BOARD_ROWS, INITIAL_FEN } from "@/lib/constants";
 import type { Piece, PieceKind, Color } from "@/lib/types";
@@ -49,7 +49,7 @@ function toY(row: number) {
 }
 
 function GridLines() {
-  const lines: JSX.Element[] = [];
+  const lines: React.ReactElement[] = [];
 
   // Horizontal lines
   for (let r = 0; r < BOARD_ROWS; r++) {
