@@ -165,7 +165,7 @@ export default function EnginesPage() {
             上传引擎
           </CardTitle>
           <CardDescription>
-            上传 UCI 协议兼容的象棋引擎二进制文件。上传后默认对全站公开可用。
+            上传 UCI 协议兼容的象棋引擎（二进制文件或 .py/.js 脚本）。上传后自动校验 UCI 握手，通过后对全站公开可用。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -182,7 +182,7 @@ export default function EnginesPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="engineFile">二进制文件</Label>
+                <Label htmlFor="engineFile">引擎文件</Label>
                 <Input
                   id="engineFile"
                   ref={fileInputRef}

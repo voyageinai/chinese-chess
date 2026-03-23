@@ -390,7 +390,7 @@ func main() {
         <Step
           number={1}
           title="理解 UCI 协议"
-          description="你的引擎是一个可执行文件，平台通过标准输入输出和它对话。就像聊天一样——平台发消息，引擎回复。"
+          description="你的引擎可以是编译好的二进制文件，也可以是 .py 或 .js 脚本。平台通过标准输入输出和它对话——就像聊天一样，平台发消息，引擎回复。"
           icon={MessageSquare}
         >
           <Card>
@@ -549,14 +549,15 @@ func main() {
               <Code language="python">{pythonExample}</Code>
               <div className="mt-3 p-3 bg-vermilion/5 border border-vermilion/10 rounded-lg text-sm text-ink-light">
                 <p className="font-semibold text-vermilion mb-1">
-                  保存 & 运行
+                  直接上传 .py 文件
                 </p>
-                <code className="font-mono text-xs">
-                  chmod +x my_engine.py && ./my_engine.py
+                <p className="text-ink-muted">
+                  平台支持直接上传 .py 脚本，无需编译或打包。上传后平台会自动用 python3 运行你的脚本。
+                  也可以本地测试：
+                </p>
+                <code className="font-mono text-xs block mt-1">
+                  python3 my_engine.py
                 </code>
-                <p className="mt-1 text-ink-muted">
-                  首行 shebang 让它可以直接作为可执行文件运行，无需额外包装。
-                </p>
               </div>
             </TabsContent>
 
@@ -576,10 +577,14 @@ func main() {
               <Code language="javascript">{jsExample}</Code>
               <div className="mt-3 p-3 bg-vermilion/5 border border-vermilion/10 rounded-lg text-sm text-ink-light">
                 <p className="font-semibold text-vermilion mb-1">
-                  保存 & 运行
+                  直接上传 .js 文件
                 </p>
-                <code className="font-mono text-xs">
-                  chmod +x my_engine.js && ./my_engine.js
+                <p className="text-ink-muted">
+                  平台支持直接上传 .js 脚本，上传后自动用 Node.js 运行。
+                  本地测试：
+                </p>
+                <code className="font-mono text-xs block mt-1">
+                  node my_engine.js
                 </code>
               </div>
             </TabsContent>

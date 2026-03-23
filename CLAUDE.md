@@ -11,31 +11,58 @@ npm run start        # Production server (NODE_ENV=production)
 npm run lint         # ESLint (Next.js core-web-vitals + TypeScript)
 npm run test         # Vitest (one-shot)
 npm run test:watch   # Vitest (watch mode)
+npx vitest run src/server/__tests__/rules.test.ts  # Run a single test file
 ```
 
 ## Architecture
 
-Self-hosted Chinese chess (xiangqi) engine tournament platform. Next.js 16 full-stack with a custom HTTP server (`server.ts`) that integrates WebSocket on the same port.
+Self-hosted Chinese chess (xiangqi) engine tournament platform. Next.js 16 full-stack with a custom HTTP server (`server.ts`) that integrates WebSocket on the same port. Server startup calls `resumeRunningTournaments()` to continue interrupted matches.
 
 ### Server-side systems (`src/server/`)
 
 - **UciEngine** (`uci.ts`) — Spawns engine subprocesses, handles UCI protocol. Auto-detects coordinate system: engines advertising `UCI_Variant` option (Fairy-Stockfish) use 1-based ranks (1-10), pure xiangqi engines (Pikafish) use 0-based (0-9). Translates internal FEN piece letters (`H`/`E`) to UCI standard (`N`/`B`) before sending via `fenToUci()`.
-- **Match** (`match.ts`) — Orchestrates a single engine-vs-engine game. Sends position as pure FEN each move (no move history accumulation). Validates moves, manages clocks, detects checkmate/stalemate/timeout/repetition/perpetual check. Stores eval from red's perspective (flips black engine eval).
+- **Match** (`match.ts`) — Orchestrates a single engine-vs-engine game. Sends position as pure FEN each move (no move history accumulation). Validates moves, manages clocks, persists each move incrementally to DB. Stores eval from red's perspective (flips black engine eval). Emits events for live WebSocket streaming.
 - **TournamentRunner** (`tournament.ts`) — Round-robin pairing, sequential match execution, Elo updates (K=32). Converts DB time (seconds) to UCI time (ms) at handoff.
-- **WsHub** (`ws.ts`) — WebSocket broadcast for live game events. Preserves non-`/ws` upgrades (Next.js HMR).
-- **Rules** (`rules.ts`) — Move generation and legality checking for all piece types.
+- **WsHub** (`ws.ts`) — WebSocket broadcast for live game events. Only intercepts `/ws` path; preserves other upgrades (Next.js HMR).
+- **Rules** (`rules.ts`) — Move generation, legality checking, check/checkmate/stalemate detection. `applyMove()` manages halfmove clock (resets on captures only — xiangqi differs from chess where pawn moves also reset).
+
+### End-of-game conditions (in `match.ts`)
+
+Checkmate, stalemate, timeout, threefold repetition (draw), perpetual check (3 consecutive checks = checking side loses), 120-halfmove no-capture draw.
 
 ### Database (`src/db/`)
 
-SQLite via `better-sqlite3` with WAL mode. Schema in `schema.ts`. On first access, `seedDefaultEngines()` auto-registers executables from `data/default-engines/` under a `__system__` user.
+SQLite via `better-sqlite3` with WAL mode. Schema in `schema.ts`, queries in `queries.ts`. On first access, `seedDefaultEngines()` auto-registers executables from `data/default-engines/` under a `__system__` user. First registered user automatically gets `admin` role.
 
 ### Frontend (`src/app/`)
 
-Next.js App Router. Pages: home, tournaments (list + detail), engines, games (replay with eval chart), guide, auth (login/register). API routes under `src/app/api/`.
+Next.js App Router. Pages: home (leaderboard + recent games), tournaments (list + detail with crosstable), engines (upload/manage), games (replay with eval chart), guide, auth (login/register with invite code). API routes under `src/app/api/`.
+
+### Key components (`src/components/`)
+
+- **Board** — Xiangqi board rendering and piece display
+- **EvalChart** — Recharts-based evaluation curve for game replay
+- **CrossTable** — Tournament crosstable (head-to-head results matrix)
+- **MoveList** — Clickable move history for game navigation
+
+### Shared library (`src/lib/`)
+
+- `types.ts` — All TypeScript types (Piece, GameState, StoredMove, WsMessage, etc.)
+- `constants.ts` — Board constants, FEN char maps, coordinate conversion helpers
+- `fen.ts` — FEN parsing (`parseFen`) and serialization (`serializeFen`)
+- `auth.ts` — Client-side `getCurrentUser()` (reads JWT from cookie)
+
+### Auth system
+
+JWT (7-day expiry) + bcryptjs password hashing. Registration requires invite code (`INVITE_CODE` env var). Login sets HTTP-only cookie.
 
 ### Path alias
 
 `@/*` maps to `./src/*` (configured in both `tsconfig.json` and `vitest.config.ts`).
+
+### Environment variables
+
+See `.env.example`: `INVITE_CODE`, `JWT_SECRET`, `MAX_CONCURRENT_MATCHES`, `ENGINE_UPLOAD_MAX_SIZE_MB`.
 
 ## Critical Conventions
 
@@ -77,5 +104,6 @@ Red = white in UCI (`wtime`/`winc`). FEN turn: `w` = red, `b` = black.
 2. **Eval is always red-perspective** — Black engine eval is sign-flipped before storage. Don't flip again when displaying.
 3. **Engine init timeout is 10 seconds** — Failure auto-forfeits; no exception thrown, result returned with empty moves.
 4. **Default engine seeding checks executable bit** (`X_OK`) to distinguish binaries from .nnue/.md files.
-5. **`MAX_CONCURRENT_MATCHES = 1`** is hardcoded — SQLite WAL would contend under concurrent writes.
+5. **`MAX_CONCURRENT_MATCHES = 1`** is hardcoded in `tournament.ts` — despite `.env.example` showing `2`, the code does not read this env var. SQLite WAL would contend under concurrent writes.
 6. **Pikafish needs matching NNUE version** — Mismatched `pikafish.nnue` causes segfault, not a graceful error.
+7. **Halfmove clock resets on captures only** — Unlike chess, pawn/soldier moves do NOT reset the clock in xiangqi. This is implemented in `rules.ts:applyMove()`.

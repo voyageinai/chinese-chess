@@ -53,6 +53,19 @@ function parseRawUciMove(uci: string): {
   };
 }
 
+/**
+ * Determine how to spawn an engine based on file extension.
+ * .py  → python3 <path>
+ * .js  → node <path>
+ * else → execute directly as binary
+ */
+function resolveSpawnArgs(enginePath: string): { cmd: string; args: string[] } {
+  const ext = path.extname(enginePath).toLowerCase();
+  if (ext === ".py") return { cmd: "python3", args: [enginePath] };
+  if (ext === ".js") return { cmd: "node", args: [enginePath] };
+  return { cmd: enginePath, args: [] };
+}
+
 export class UciEngine extends EventEmitter {
   private process: ChildProcess | null = null;
   private buffer = "";
@@ -71,7 +84,8 @@ export class UciEngine extends EventEmitter {
   }
 
   async init(): Promise<void> {
-    this.process = spawn(this.binaryPath, [], {
+    const { cmd, args } = resolveSpawnArgs(this.binaryPath);
+    this.process = spawn(cmd, args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: path.dirname(this.binaryPath),
     });
