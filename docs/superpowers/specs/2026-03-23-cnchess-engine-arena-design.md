@@ -17,7 +17,7 @@
 
 | 层面 | 选型 | 理由 |
 |------|------|------|
-| 框架 | Next.js (App Router) | TypeScript 全栈，页面路由 + API 路由 + SSR |
+| 框架 | Next.js (App Router) + 自定义 server.ts | TypeScript 全栈，自定义服务器包装以支持 WebSocket upgrade |
 | 棋盘渲染 | chessgroundx | Lichess 血统，支持象棋，拖拽/点击/动画 |
 | 数据库 | SQLite (better-sqlite3) | 零配置，单文件，本地场景完美匹配 |
 | 引擎管理 | node:child_process | spawn 引擎子进程，stdin/stdout 交互 UCI 协议 |
@@ -145,10 +145,12 @@ Next.js 应用 (单进程)
 3. 对战循环：
    - 发送 `position startpos moves ...`
    - 发送 `go wtime X btime Y winc Z binc W`
+   - 解析引擎输出的 `info score cp/mate` 行，记录评估值到 moves 中的 eval 字段
    - 等待 `bestmove <move>`
    - 验证走法合法性（TypeScript 规则引擎）
    - 通过 WebSocket 推送走子给前端
    - 检查终局条件：将死、和棋（重复局面/无子可动/60回合无吃子）、超时、非法走法
+   - 注：长将判负（连续将军 3 次），简化处理，不实现完整的长捉规则
 4. 记录结果，kill 引擎进程
 
 ### Elo 计算
@@ -156,6 +158,7 @@ Next.js 应用 (单进程)
 使用标准 Elo 公式，K=32：
 - 期望胜率：`E = 1 / (1 + 10^((Rb - Ra) / 400))`
 - 新 Elo：`Ra' = Ra + K * (S - E)`，其中 S 为实际得分（胜1/和0.5/负0）
+- Elo 为全局评分，跨锦标赛累计。`tournament_entries.score` 为单场锦标赛内的得分
 
 ## 用户认证
 
@@ -170,6 +173,8 @@ Next.js 应用 (单进程)
 - 存储隔离：`data/engines/{userId}/{engineId}/` 目录
 - 上传后自动设置可执行权限 (`chmod +x`)
 - 并发控制：根据配置限制同时运行的对战数（默认 2）
+- 引擎进程资源限制：超时强制 kill、限制内存使用（可选 ulimit）
+- 安全说明：本平台面向受信任的小圈子用户，不实现完整沙箱。如需更高安全性，可后续引入 firejail/nsjail
 
 ## 项目结构
 
