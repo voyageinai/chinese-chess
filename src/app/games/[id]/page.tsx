@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, useRef, use } from "react";
 import { Board } from "@/components/Board";
 import { MoveList } from "@/components/MoveList";
 import { EvalChart } from "@/components/EvalChart";
@@ -45,8 +45,11 @@ export default function GamePage({
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [redTime, setRedTime] = useState(0);
   const [blackTime, setBlackTime] = useState(0);
+  /** Which side is currently thinking (for live clock countdown) */
+  const [activeSide, setActiveSide] = useState<"red" | "black" | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch game data
   useEffect(() => {
@@ -66,6 +69,10 @@ export default function GamePage({
         setCurrentIndex(parsedMoves.length - 1);
         setRedTime(data.game.red_time_left || 0);
         setBlackTime(data.game.black_time_left || 0);
+        // If game is in progress, determine whose turn it is
+        if (!data.game.result && data.game.started_at) {
+          setActiveSide(parsedMoves.length % 2 === 0 ? "red" : "black");
+        }
         setLoading(false);
       })
       .catch((err) => {
@@ -87,16 +94,27 @@ export default function GamePage({
 
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
+      if (msg.type === "game_start" && msg.gameId === id) {
+        // Game just started — red moves first
+        setActiveSide("red");
+      }
       if (msg.type === "move" && msg.gameId === id) {
-        setMoves((prev) => [
-          ...prev,
-          { move: msg.move, fen: msg.fen, time_ms: 0, eval: msg.eval },
-        ]);
+        setMoves((prev) => {
+          const next = [
+            ...prev,
+            { move: msg.move, fen: msg.fen, time_ms: 0, eval: msg.eval },
+          ];
+          // After this move, the OTHER side thinks next
+          // Even-length moves array → red just moved → black's turn
+          setActiveSide(next.length % 2 === 0 ? "black" : "red");
+          return next;
+        });
         setCurrentIndex((prev) => prev + 1);
         setRedTime(msg.redTime);
         setBlackTime(msg.blackTime);
       }
       if (msg.type === "game_end" && msg.gameId === id) {
+        setActiveSide(null);
         setGame((prev) =>
           prev ? { ...prev, result: msg.result } : prev,
         );
@@ -105,6 +123,24 @@ export default function GamePage({
 
     return () => ws.close();
   }, [id, game?.result]);
+
+  // Live clock countdown — tick every 100ms while a side is thinking
+  useEffect(() => {
+    if (tickRef.current) clearInterval(tickRef.current);
+    if (!activeSide) return;
+
+    tickRef.current = setInterval(() => {
+      if (activeSide === "red") {
+        setRedTime((t) => Math.max(0, t - 100));
+      } else {
+        setBlackTime((t) => Math.max(0, t - 100));
+      }
+    }, 100);
+
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current);
+    };
+  }, [activeSide]);
 
   // Keyboard navigation
   useEffect(() => {
