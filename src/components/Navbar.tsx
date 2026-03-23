@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Swords, Trophy, Cpu, Home } from "lucide-react";
+import { Swords, Trophy, Cpu, Home, LogIn, User } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "首页", icon: Home },
@@ -10,8 +11,23 @@ const navItems = [
   { href: "/engines", label: "引擎", icon: Cpu },
 ];
 
+interface CurrentUser {
+  username: string;
+  role: "admin" | "user";
+}
+
 export function Navbar() {
   const pathname = usePathname();
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setUser(d?.user ?? null))
+      .catch(() => {})
+      .finally(() => setChecked(true));
+  }, [pathname]);
 
   return (
     <nav className="border-b border-paper-300 bg-paper-100/80 backdrop-blur-sm sticky top-0 z-50">
@@ -38,6 +54,29 @@ export function Navbar() {
               </Link>
             );
           })}
+
+          {checked && (
+            <>
+              {user ? (
+                <span className="flex items-center gap-1.5 text-sm text-ink-muted">
+                  <User className="w-4 h-4" />
+                  {user.username}
+                </span>
+              ) : (
+                <Link
+                  href="/login"
+                  className={`flex items-center gap-1.5 text-sm transition-colors ${
+                    pathname === "/login"
+                      ? "text-ink font-semibold"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  <LogIn className="w-4 h-4" />
+                  登录
+                </Link>
+              )}
+            </>
+          )}
         </div>
       </div>
     </nav>
