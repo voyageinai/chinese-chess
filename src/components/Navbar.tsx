@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Swords, Trophy, Cpu, Home, LogIn, User } from "lucide-react";
+import { Swords, Trophy, Cpu, Home, LogIn, User, BookOpen } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "首页", icon: Home },
   { href: "/tournaments", label: "锦标赛", icon: Trophy },
   { href: "/engines", label: "引擎", icon: Cpu },
+  { href: "/guide", label: "接入指南", icon: BookOpen },
 ];
 
 interface CurrentUser {
