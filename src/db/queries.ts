@@ -215,6 +215,18 @@ export function createGame(
   return getGameById(id)!;
 }
 
+export function updateGameMoves(
+  id: string,
+  moves: string,
+  redTimeLeft: number,
+  blackTimeLeft: number,
+): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE games SET moves = ?, red_time_left = ?, black_time_left = ? WHERE id = ?",
+  ).run(moves, redTimeLeft, blackTimeLeft, id);
+}
+
 export function updateGameResult(
   id: string,
   result: "red" | "black" | "draw",

@@ -9,6 +9,7 @@ import {
   isLegalMove,
 } from "./rules";
 import { INITIAL_FEN, uciToSquare, squareToUci } from "@/lib/constants";
+import { updateGameMoves } from "@/db/queries";
 import type { Color, StoredMove, GameState, Move } from "@/lib/types";
 import { EventEmitter } from "events";
 
@@ -249,6 +250,9 @@ export class Match extends EventEmitter {
           eval: evalScore,
         };
         storedMoves.push(storedMove);
+
+        // Persist moves incrementally so new viewers see current state
+        updateGameMoves(gameId, JSON.stringify(storedMoves), redTime, blackTime);
 
         // Emit move event for WebSocket
         this.emit("move", {
