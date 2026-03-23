@@ -105,8 +105,8 @@ export default function GamePage({
             { move: msg.move, fen: msg.fen, time_ms: 0, eval: msg.eval },
           ];
           // After this move, the OTHER side thinks next
-          // Even-length moves array → red just moved → black's turn
-          setActiveSide(next.length % 2 === 0 ? "black" : "red");
+          // Odd-length (1,3,5..) → red just moved → black's turn
+          setActiveSide(next.length % 2 === 0 ? "red" : "black");
           return next;
         });
         setCurrentIndex((prev) => prev + 1);
