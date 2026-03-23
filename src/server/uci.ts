@@ -45,6 +45,9 @@ export class UciEngine extends EventEmitter {
     this.send("uci");
     await this.waitFor("uciok");
 
+    // Set xiangqi variant for multi-variant engines (e.g. Fairy-Stockfish)
+    this.send("setoption name UCI_Variant value xiangqi");
+
     this.send("isready");
     await this.waitFor("readyok");
   }

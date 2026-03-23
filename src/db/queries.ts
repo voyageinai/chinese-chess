@@ -70,7 +70,9 @@ export function createEngine(
 export function getEnginesByUser(userId: string): Engine[] {
   const db = getDb();
   return db
-    .prepare("SELECT * FROM engines WHERE user_id = ?")
+    .prepare(
+      "SELECT * FROM engines WHERE user_id = ? OR user_id = '__system__' ORDER BY user_id = '__system__' DESC, uploaded_at DESC",
+    )
     .all(userId) as Engine[];
 }
 
