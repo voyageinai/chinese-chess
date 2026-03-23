@@ -15,9 +15,8 @@ class WsHub {
         this.wss!.handleUpgrade(request, socket, head, (ws) => {
           this.wss!.emit("connection", ws, request);
         });
-      } else {
-        socket.destroy();
       }
+      // Don't destroy non-/ws upgrades — let Next.js HMR WebSocket pass through
     });
 
     this.wss.on("connection", (ws) => {
