@@ -112,6 +112,7 @@ export class TournamentRunner extends EventEmitter {
 
       // Emit game_start event
       this.emit("game_start", {
+        type: "game_start",
         gameId,
         redEngine: redEngine.name,
         blackEngine: blackEngine.name,
@@ -127,9 +128,9 @@ export class TournamentRunner extends EventEmitter {
 
       const match = new Match(matchConfig);
 
-      // Forward move events
+      // Forward move events (add type field for WebSocket clients)
       match.on("move", (moveData) => {
-        this.emit("move", moveData);
+        this.emit("move", { type: "move", ...moveData });
       });
 
       let result: MatchResult;
@@ -218,6 +219,7 @@ export class TournamentRunner extends EventEmitter {
 
       // Emit game_end
       this.emit("game_end", {
+        type: "game_end",
         gameId,
         result: result.result,
       });
@@ -240,7 +242,7 @@ export class TournamentRunner extends EventEmitter {
     queries.updateTournamentStatus(this.tournamentId, "finished");
 
     // Emit tournament_end
-    this.emit("tournament_end", { tournamentId: this.tournamentId });
+    this.emit("tournament_end", { type: "tournament_end", tournamentId: this.tournamentId });
   }
 
   abort(): void {
