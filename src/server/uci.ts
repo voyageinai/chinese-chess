@@ -15,6 +15,24 @@ export interface GoResult {
 }
 
 /**
+ * Convert internal FEN piece letters (H=horse, E=elephant) to UCI standard
+ * (N=knight, B=bishop) that all engines understand.
+ */
+function fenToUci(cmd: string): string {
+  // Only transform the FEN portion of "position fen ..." commands
+  return cmd.replace(
+    /^(position fen )(.+)/,
+    (_, prefix, fen) =>
+      prefix +
+      fen
+        .replace(/H/g, "N")
+        .replace(/h/g, "n")
+        .replace(/E/g, "B")
+        .replace(/e/g, "b"),
+  );
+}
+
+/**
  * Parse a UCI move string that may use 0-based (a0-i9) or 1-based (a1-i10) ranks.
  * Returns { fromCol, fromRank, toCol, toRank } with raw rank numbers as-is.
  */
@@ -115,7 +133,9 @@ export class UciEngine extends EventEmitter {
   }
 
   async go(positionCommand: string, options: GoOptions): Promise<GoResult> {
-    this.send(positionCommand);
+    // Normalize FEN piece letters: our internal format uses H(horse)/E(elephant)
+    // but UCI standard (Pikafish, Fairy-Stockfish) uses N(knight)/B(bishop)
+    this.send(fenToUci(positionCommand));
     this.send(
       `go wtime ${options.wtime} btime ${options.btime} winc ${options.winc} binc ${options.binc}`
     );
