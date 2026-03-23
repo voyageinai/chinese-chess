@@ -255,6 +255,7 @@ export class Match extends EventEmitter {
         updateGameMoves(gameId, JSON.stringify(storedMoves), redTime, blackTime);
 
         // Emit move event for WebSocket
+        // movedAt lets the client compensate for network delay
         this.emit("move", {
           gameId,
           move: canonicalMove,
@@ -262,6 +263,7 @@ export class Match extends EventEmitter {
           eval: evalScore,
           redTime,
           blackTime,
+          movedAt: Date.now(),
         });
 
         // --- Check termination conditions ---

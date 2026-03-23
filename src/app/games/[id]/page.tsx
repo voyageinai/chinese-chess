@@ -43,13 +43,31 @@ export default function GamePage({
   const [blackEngine, setBlackEngine] = useState<Engine | null>(null);
   const [moves, setMoves] = useState<StoredMove[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
+  // --- Clock state: refs are the source of truth, state is for rendering ---
+  const clockRef = useRef({ red: 0, black: 0 });
   const [redTime, setRedTime] = useState(0);
   const [blackTime, setBlackTime] = useState(0);
-  /** Which side is currently thinking (for live clock countdown) */
-  const [activeSide, setActiveSide] = useState<"red" | "black" | null>(null);
+  /** Which side is currently thinking (for live clock countdown), null = stopped */
+  const activeSideRef = useRef<"red" | "black" | null>(null);
+  const [, forceRender] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastFrameRef = useRef<number>(0);
+
+  /** Update clock refs and sync to React state for display */
+  function setClock(red: number, black: number) {
+    clockRef.current.red = red;
+    clockRef.current.black = black;
+    setRedTime(red);
+    setBlackTime(black);
+  }
+
+  function setActiveSide(side: "red" | "black" | null) {
+    activeSideRef.current = side;
+    lastFrameRef.current = performance.now();
+    forceRender((n) => n + 1);
+  }
 
   // Fetch game data
   useEffect(() => {
@@ -67,11 +85,30 @@ export default function GamePage({
         );
         setMoves(parsedMoves);
         setCurrentIndex(parsedMoves.length - 1);
-        setRedTime(data.game.red_time_left || 0);
-        setBlackTime(data.game.black_time_left || 0);
-        // If game is in progress, determine whose turn it is
-        if (!data.game.result && data.game.started_at) {
-          setActiveSide(parsedMoves.length % 2 === 0 ? "red" : "black");
+
+        const rTime = data.game.red_time_left || 0;
+        const bTime = data.game.black_time_left || 0;
+
+        if (!data.game.result && data.game.started_at && parsedMoves.length > 0) {
+          // Late joiner: estimate how long the current engine has been thinking.
+          // DB times are from the last completed move; compute wall-clock elapsed since.
+          const totalMoveMs = parsedMoves.reduce(
+            (sum: number, m: StoredMove) => sum + (m.time_ms || 0),
+            0,
+          );
+          const wallElapsed = (Date.now() / 1000 - data.game.started_at) * 1000;
+          const thinkingElapsed = Math.max(0, wallElapsed - totalMoveMs);
+          const side = parsedMoves.length % 2 === 0 ? "red" : "black";
+          setClock(
+            side === "red" ? rTime - thinkingElapsed : rTime,
+            side === "black" ? bTime - thinkingElapsed : bTime,
+          );
+          setActiveSide(side);
+        } else {
+          setClock(rTime, bTime);
+          if (!data.game.result && data.game.started_at) {
+            setActiveSide("red");
+          }
         }
         setLoading(false);
       })
@@ -83,7 +120,7 @@ export default function GamePage({
 
   // WebSocket for live updates
   useEffect(() => {
-    if (!game || game.result) return; // Game is over or not loaded
+    if (!game || game.result) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
@@ -95,7 +132,6 @@ export default function GamePage({
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.type === "game_start" && msg.gameId === id) {
-        // Game just started — red moves first
         setActiveSide("red");
       }
       if (msg.type === "move" && msg.gameId === id) {
@@ -104,14 +140,20 @@ export default function GamePage({
             ...prev,
             { move: msg.move, fen: msg.fen, time_ms: 0, eval: msg.eval },
           ];
-          // After this move, the OTHER side thinks next
-          // Odd-length (1,3,5..) → red just moved → black's turn
-          setActiveSide(next.length % 2 === 0 ? "red" : "black");
+          const nextSide = next.length % 2 === 0 ? "red" : "black";
+
+          // Compensate for network delay: the server included movedAt timestamp,
+          // so we know how stale the clock values are. Subtract the lag from
+          // the side that is NOW thinking (they've already been thinking for `lag` ms).
+          const lag = msg.movedAt ? Math.max(0, Date.now() - msg.movedAt) : 0;
+          setClock(
+            nextSide === "red" ? msg.redTime - lag : msg.redTime,
+            nextSide === "black" ? msg.blackTime - lag : msg.blackTime,
+          );
+          setActiveSide(nextSide);
           return next;
         });
         setCurrentIndex((prev) => prev + 1);
-        setRedTime(msg.redTime);
-        setBlackTime(msg.blackTime);
       }
       if (msg.type === "game_end" && msg.gameId === id) {
         setActiveSide(null);
@@ -124,23 +166,31 @@ export default function GamePage({
     return () => ws.close();
   }, [id, game?.result]);
 
-  // Live clock countdown — tick every 100ms while a side is thinking
+  // --- requestAnimationFrame clock countdown ---
+  // Uses delta time for accuracy; caps at 200ms to handle tab backgrounding.
   useEffect(() => {
-    if (tickRef.current) clearInterval(tickRef.current);
-    if (!activeSide) return;
-
-    tickRef.current = setInterval(() => {
-      if (activeSide === "red") {
-        setRedTime((t) => Math.max(0, t - 100));
-      } else {
-        setBlackTime((t) => Math.max(0, t - 100));
+    function tick(now: number) {
+      const side = activeSideRef.current;
+      if (side) {
+        const delta = Math.min(now - lastFrameRef.current, 200);
+        lastFrameRef.current = now;
+        const clk = clockRef.current;
+        if (side === "red") {
+          clk.red = Math.max(0, clk.red - delta);
+          setRedTime(clk.red);
+        } else {
+          clk.black = Math.max(0, clk.black - delta);
+          setBlackTime(clk.black);
+        }
       }
-    }, 100);
+      rafRef.current = requestAnimationFrame(tick);
+    }
 
+    rafRef.current = requestAnimationFrame(tick);
     return () => {
-      if (tickRef.current) clearInterval(tickRef.current);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [activeSide]);
+  }, []);
 
   // Keyboard navigation
   useEffect(() => {
