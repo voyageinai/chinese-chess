@@ -32,43 +32,36 @@ esac
 
 echo "  系统: $OS / $ARCH → $PLATFORM"
 
-# Download Pikafish
-PIKAFISH_VERSION="2025-01-26"
+# Download Pikafish (now distributed as a single 7z archive)
+PIKAFISH_VERSION="Pikafish-2026-01-02"
 echo ""
 echo "→ 下载 Pikafish ($PIKAFISH_VERSION)..."
 
-PIKAFISH_URL="https://github.com/official-pikafish/Pikafish/releases/download/${PIKAFISH_VERSION}"
+PIKAFISH_URL="https://github.com/official-pikafish/Pikafish/releases/download/${PIKAFISH_VERSION}/Pikafish.2026-01-02.7z"
+OUTPUT_PATH="${ENGINES_DIR}/pikafish"
+NNUE_PATH="${ENGINES_DIR}/pikafish.nnue"
 
 case "$PLATFORM" in
-    x86-64)
-        PIKAFISH_FILE="pikafish-bmi2-x86-64"
-        [[ "$OS" == "linux" ]] && PIKAFISH_FILE="pikafish-bmi2-x86-64"
-        [[ "$OS" == "darwin" ]] && PIKAFISH_FILE="pikafish-bmi2-x86-64-macos"
-        ;;
-    aarch64)
-        PIKAFISH_FILE="pikafish-armv8-dotprod"
-        ;;
-    apple-silicon)
-        PIKAFISH_FILE="pikafish-apple-silicon"
-        ;;
+    x86-64)       ARCHIVE_BINARY="Linux/pikafish-bmi2" ;;
+    aarch64)      ARCHIVE_BINARY="Linux/pikafish-bmi2" ;;
+    apple-silicon) ARCHIVE_BINARY="MacOS/pikafish-apple-silicon" ;;
 esac
 
-DOWNLOAD_URL="${PIKAFISH_URL}/${PIKAFISH_FILE}"
-OUTPUT_PATH="${ENGINES_DIR}/pikafish"
-
-if [ -f "$OUTPUT_PATH" ]; then
+if [ -f "$OUTPUT_PATH" ] && file "$OUTPUT_PATH" | grep -q "ELF\|Mach-O"; then
     echo "  Pikafish 已存在，跳过下载"
 else
-    echo "  下载: $DOWNLOAD_URL"
+    echo "  下载: $PIKAFISH_URL"
+    ARCHIVE_PATH="/tmp/pikafish-$$.7z"
+
     if command -v curl &> /dev/null; then
-        curl -L -o "$OUTPUT_PATH" "$DOWNLOAD_URL" 2>/dev/null || {
+        curl -L -o "$ARCHIVE_PATH" "$PIKAFISH_URL" || {
             echo "  ⚠ 下载失败。你可以手动下载:"
             echo "    https://github.com/official-pikafish/Pikafish/releases"
             echo "    放到 $ENGINES_DIR/pikafish"
             exit 0
         }
     elif command -v wget &> /dev/null; then
-        wget -O "$OUTPUT_PATH" "$DOWNLOAD_URL" 2>/dev/null || {
+        wget -O "$ARCHIVE_PATH" "$PIKAFISH_URL" || {
             echo "  ⚠ 下载失败。手动下载地址:"
             echo "    https://github.com/official-pikafish/Pikafish/releases"
             exit 0
@@ -77,7 +70,28 @@ else
         echo "  需要 curl 或 wget"
         exit 1
     fi
+
+    echo "  解压引擎..."
+    # Try 7z first, fall back to python py7zr
+    EXTRACT_DIR="/tmp/pikafish-extract-$$"
+    if command -v 7z &> /dev/null; then
+        7z x -o"$EXTRACT_DIR" "$ARCHIVE_PATH" "$ARCHIVE_BINARY" "pikafish.nnue" -y > /dev/null
+    elif python3 -c "import py7zr" 2>/dev/null; then
+        python3 -c "
+import py7zr
+with py7zr.SevenZipFile('$ARCHIVE_PATH', 'r') as z:
+    z.extract(path='$EXTRACT_DIR', targets=['$ARCHIVE_BINARY', 'pikafish.nnue'])
+"
+    else
+        echo "  需要 7z 或 python3 py7zr (pip install py7zr)"
+        rm -f "$ARCHIVE_PATH"
+        exit 1
+    fi
+
+    mv "$EXTRACT_DIR/$ARCHIVE_BINARY" "$OUTPUT_PATH"
+    mv "$EXTRACT_DIR/pikafish.nnue" "$NNUE_PATH"
     chmod +x "$OUTPUT_PATH"
+    rm -rf "$ARCHIVE_PATH" "$EXTRACT_DIR"
     echo "  ✓ Pikafish 已下载到 $OUTPUT_PATH"
 fi
 
