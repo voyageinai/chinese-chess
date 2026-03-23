@@ -134,7 +134,7 @@ export default function TournamentsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="font-brush text-3xl text-ink">锦标赛</h1>
-        {user?.role === "admin" && (
+        {user && (
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger
               render={
@@ -213,7 +213,9 @@ export default function TournamentsPage() {
         <div className="text-center py-16 text-ink-muted">
           <Trophy className="w-10 h-10 mx-auto mb-3 opacity-50" />
           <p className="font-brush text-xl">暂无锦标赛</p>
-          <p className="text-sm mt-1">管理员可以创建第一场锦标赛。</p>
+          <p className="text-sm mt-1">
+            {user ? "你可以创建第一场锦标赛。" : "登录后即可创建锦标赛。"}
+          </p>
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

@@ -40,6 +40,7 @@ export default function EnginesPage() {
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -52,7 +53,7 @@ export default function EnginesPage() {
         }
 
         setAuthenticated(true);
-        const engRes = await fetch("/api/engines");
+        const engRes = await fetch("/api/engines?scope=owned");
         if (engRes.ok) {
           const data = await engRes.json();
           setEngines(data.engines ?? []);
@@ -103,6 +104,7 @@ export default function EnginesPage() {
 
   async function handleDelete(engineId: string) {
     if (confirmDeleteId !== engineId) {
+      setDeleteError("");
       setConfirmDeleteId(engineId);
       return;
     }
@@ -115,9 +117,12 @@ export default function EnginesPage() {
 
       if (res.ok) {
         setEngines((prev) => prev.filter((e) => e.id !== engineId));
+      } else {
+        const data = await res.json().catch(() => null);
+        setDeleteError(data?.error || "删除失败");
       }
     } catch {
-      // ignore
+      setDeleteError("网络错误");
     } finally {
       setDeletingId(null);
       setConfirmDeleteId(null);
@@ -160,7 +165,7 @@ export default function EnginesPage() {
             上传引擎
           </CardTitle>
           <CardDescription>
-            上传 UCI 协议兼容的象棋引擎二进制文件。
+            上传 UCI 协议兼容的象棋引擎二进制文件。上传后默认对全站公开可用。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -205,55 +210,60 @@ export default function EnginesPage() {
           <p className="text-sm mt-1">使用上方表单上传您的第一个引擎。</p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {engines.map((engine) => (
-            <Card key={engine.id}>
-              <CardHeader>
-                <CardTitle className="truncate">{engine.name}</CardTitle>
-                <CardAction>
-                  <Button
-                    variant="destructive"
-                    size="icon-sm"
-                    onClick={() => handleDelete(engine.id)}
-                    disabled={deletingId === engine.id}
-                    title={
-                      confirmDeleteId === engine.id
-                        ? "再次点击确认删除"
-                        : "删除引擎"
-                    }
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </CardAction>
-                <CardDescription>
-                  {confirmDeleteId === engine.id && (
-                    <span className="text-destructive font-medium">
-                      再次点击确认删除
-                    </span>
-                  )}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-ink-muted">等级分</span>
-                  <span className="font-mono font-semibold">{engine.elo}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm mt-1">
-                  <span className="text-ink-muted">对局数</span>
-                  <span className="font-mono">{engine.games_played}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm mt-1">
-                  <span className="text-ink-muted">上传时间</span>
-                  <span className="text-xs text-ink-muted">
-                    {new Date(engine.uploaded_at * 1000).toLocaleDateString(
-                      "zh-CN",
+        <>
+          {deleteError && (
+            <p className="text-sm text-destructive">{deleteError}</p>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {engines.map((engine) => (
+              <Card key={engine.id}>
+                <CardHeader>
+                  <CardTitle className="truncate">{engine.name}</CardTitle>
+                  <CardAction>
+                    <Button
+                      variant="destructive"
+                      size="icon-sm"
+                      onClick={() => handleDelete(engine.id)}
+                      disabled={deletingId === engine.id}
+                      title={
+                        confirmDeleteId === engine.id
+                          ? "再次点击确认删除"
+                          : "删除引擎"
+                      }
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </CardAction>
+                  <CardDescription>
+                    {confirmDeleteId === engine.id && (
+                      <span className="text-destructive font-medium">
+                        再次点击确认删除
+                      </span>
                     )}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-ink-muted">等级分</span>
+                    <span className="font-mono font-semibold">{engine.elo}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mt-1">
+                    <span className="text-ink-muted">对局数</span>
+                    <span className="font-mono">{engine.games_played}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mt-1">
+                    <span className="text-ink-muted">上传时间</span>
+                    <span className="text-xs text-ink-muted">
+                      {new Date(engine.uploaded_at * 1000).toLocaleDateString(
+                        "zh-CN",
+                      )}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

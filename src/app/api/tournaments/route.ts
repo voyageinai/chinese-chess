@@ -25,13 +25,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (user.role !== "admin") {
-      return NextResponse.json(
-        { error: "Admin access required" },
-        { status: 403 },
-      );
-    }
-
     const { name, timeBase, timeInc, rounds } = await request.json();
 
     if (!name || timeBase == null || timeInc == null) {
@@ -48,21 +41,32 @@ export async function POST(request: Request) {
       );
     }
 
-    if (typeof timeBase !== "number" || timeBase <= 0) {
+    if (typeof timeBase !== "number" || !Number.isFinite(timeBase) || timeBase <= 0) {
       return NextResponse.json(
         { error: "timeBase must be a positive number" },
         { status: 400 },
       );
     }
 
-    if (typeof timeInc !== "number" || timeInc < 0) {
+    if (typeof timeInc !== "number" || !Number.isFinite(timeInc) || timeInc < 0) {
       return NextResponse.json(
         { error: "timeInc must be a non-negative number" },
         { status: 400 },
       );
     }
 
+    if (
+      rounds != null &&
+      (typeof rounds !== "number" || !Number.isFinite(rounds) || rounds <= 0)
+    ) {
+      return NextResponse.json(
+        { error: "rounds must be a positive number" },
+        { status: 400 },
+      );
+    }
+
     const tournament = createTournament(
+      user.id,
       name.trim(),
       timeBase,
       timeInc,

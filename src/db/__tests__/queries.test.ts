@@ -8,8 +8,10 @@ import {
   getUserById,
   createEngine,
   getEnginesByUser,
+  getVisibleEngines,
   getEngineById,
   deleteEngine,
+  isEngineReferenced,
   updateEngineElo,
   getLeaderboard,
   createTournament,
@@ -86,6 +88,10 @@ describe("Engines", () => {
     const byUser = getEnginesByUser(user.id);
     expect(byUser).toHaveLength(1);
     expect(byUser[0].id).toBe(engine.id);
+
+    const visible = getVisibleEngines();
+    expect(visible).toHaveLength(1);
+    expect(visible[0].id).toBe(engine.id);
   });
 
   it("deletes an engine", () => {
@@ -119,12 +125,26 @@ describe("Engines", () => {
     expect(lb[1].name).toBe("AliceEngine");
     expect(lb[1].owner).toBe("alice");
   });
+
+  it("marks engines as referenced once they are used in a tournament", () => {
+    const user = createUser("alice", "hashedpw1");
+    const engine = createEngine(user.id, "PikafishV1", "/bin/pikafish");
+    const opponent = createEngine(user.id, "PikafishV2", "/bin/pikafish2");
+    const tournament = createTournament(user.id, "Cup", 60, 0);
+
+    expect(isEngineReferenced(engine.id)).toBe(false);
+    addEngineToTournament(tournament.id, engine.id);
+    addEngineToTournament(tournament.id, opponent.id);
+    expect(isEngineReferenced(engine.id)).toBe(true);
+  });
 });
 
 describe("Tournaments", () => {
   it("creates and lists tournaments", () => {
-    const t = createTournament("Spring Open", 300, 5, 2);
+    const user = createUser("alice", "hashedpw1");
+    const t = createTournament(user.id, "Spring Open", 300, 5, 2);
     expect(t.name).toBe("Spring Open");
+    expect(t.owner_id).toBe(user.id);
     expect(t.status).toBe("pending");
     expect(t.time_control_base).toBe(300);
     expect(t.time_control_inc).toBe(5);
@@ -136,7 +156,8 @@ describe("Tournaments", () => {
   });
 
   it("updates tournament status", () => {
-    const t = createTournament("Spring Open", 300, 5);
+    const user = createUser("alice", "hashedpw1");
+    const t = createTournament(user.id, "Spring Open", 300, 5);
     updateTournamentStatus(t.id, "running");
     expect(getTournamentById(t.id)!.status).toBe("running");
 
@@ -152,7 +173,7 @@ describe("Tournament Entries", () => {
     const user = createUser("alice", "hashedpw1");
     const e1 = createEngine(user.id, "Engine1", "/bin/e1");
     const e2 = createEngine(user.id, "Engine2", "/bin/e2");
-    const t = createTournament("Cup", 180, 2);
+    const t = createTournament(user.id, "Cup", 180, 2);
 
     addEngineToTournament(t.id, e1.id);
     addEngineToTournament(t.id, e2.id);
@@ -180,7 +201,7 @@ describe("Games", () => {
     const user = createUser("alice", "hashedpw1");
     const e1 = createEngine(user.id, "Red", "/bin/r");
     const e2 = createEngine(user.id, "Black", "/bin/b");
-    const t = createTournament("Match", 60, 0);
+    const t = createTournament(user.id, "Match", 60, 0);
     addEngineToTournament(t.id, e1.id);
     addEngineToTournament(t.id, e2.id);
 

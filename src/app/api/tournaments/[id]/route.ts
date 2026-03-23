@@ -61,6 +61,15 @@ export async function PUT(
       );
     }
 
+    const canManageTournament =
+      tournament.owner_id === user.id || user.role === "admin";
+    if (!canManageTournament) {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 },
+      );
+    }
+
     if (tournament.status !== "pending") {
       return NextResponse.json(
         { error: "Can only add engines to pending tournaments" },
@@ -82,6 +91,13 @@ export async function PUT(
       return NextResponse.json(
         { error: "Engine not found" },
         { status: 404 },
+      );
+    }
+
+    if (engine.visibility !== "public" && engine.user_id !== user.id && user.role !== "admin") {
+      return NextResponse.json(
+        { error: "Engine is not available for this tournament" },
+        { status: 403 },
       );
     }
 
@@ -119,13 +135,6 @@ export async function POST(
       );
     }
 
-    if (user.role !== "admin") {
-      return NextResponse.json(
-        { error: "Admin access required" },
-        { status: 403 },
-      );
-    }
-
     const { id } = await params;
     const tournament = getTournamentById(id);
 
@@ -133,6 +142,13 @@ export async function POST(
       return NextResponse.json(
         { error: "Tournament not found" },
         { status: 404 },
+      );
+    }
+
+    if (tournament.owner_id !== user.id && user.role !== "admin") {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 },
       );
     }
 

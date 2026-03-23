@@ -3,11 +3,11 @@ import { nanoid } from "nanoid";
 import { mkdir, writeFile, chmod } from "fs/promises";
 import path from "path";
 import { getCurrentUser } from "@/lib/auth";
-import { createEngine, getEnginesByUser } from "@/db/queries";
+import { createEngine, getEnginesByUser, getVisibleEngines } from "@/db/queries";
 
 const MAX_FILE_SIZE = parseInt(process.env.MAX_ENGINE_SIZE || "52428800", 10); // 50MB default
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     if (!user) {
@@ -17,7 +17,10 @@ export async function GET() {
       );
     }
 
-    const engines = getEnginesByUser(user.id);
+    const url = new URL(request.url);
+    const scope = url.searchParams.get("scope");
+    const engines =
+      scope === "owned" ? getEnginesByUser(user.id) : getVisibleEngines();
     return NextResponse.json({ engines });
   } catch (error) {
     console.error("Get engines error:", error);
@@ -80,7 +83,7 @@ export async function POST(request: Request) {
     await writeFile(binaryPath, buffer);
     await chmod(binaryPath, 0o755);
 
-    const engine = createEngine(user.id, name.trim(), binaryPath);
+    const engine = createEngine(user.id, name.trim(), binaryPath, "public");
 
     return NextResponse.json({ engine }, { status: 201 });
   } catch (error) {

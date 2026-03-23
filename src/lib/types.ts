@@ -46,11 +46,14 @@ export interface User {
   created_at: number;
 }
 
+export type EngineVisibility = "public" | "private";
+
 export interface Engine {
   id: string;
   user_id: string;
   name: string;
   binary_path: string;
+  visibility: EngineVisibility;
   elo: number;
   games_played: number;
   uploaded_at: number;
@@ -58,6 +61,7 @@ export interface Engine {
 
 export interface Tournament {
   id: string;
+  owner_id: string;
   name: string;
   status: "pending" | "running" | "finished";
   time_control_base: number;

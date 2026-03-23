@@ -3,6 +3,7 @@ import { getDb } from "./index";
 import type {
   User,
   Engine,
+  EngineVisibility,
   Tournament,
   TournamentEntry,
   Game,
@@ -20,9 +21,9 @@ export function createUser(username: string, passwordHash: string): User {
   const id = nanoid();
 
   // First user auto-becomes admin
-  const count = db.prepare("SELECT COUNT(*) as cnt FROM users").get() as {
-    cnt: number;
-  };
+  const count = db
+    .prepare("SELECT COUNT(*) as cnt FROM users WHERE id != '__system__'")
+    .get() as { cnt: number };
   const role = count.cnt === 0 ? "admin" : "user";
 
   db.prepare(
@@ -46,7 +47,8 @@ export function getUserById(id: string): User | undefined {
     | undefined;
   if (!row) return undefined;
   // Strip password before returning
-  const { password: _, ...user } = row;
+  const { password, ...user } = row;
+  void password;
   return user;
 }
 
@@ -56,13 +58,14 @@ export function createEngine(
   userId: string,
   name: string,
   binaryPath: string,
+  visibility: EngineVisibility = "public",
 ): Engine {
   const db = getDb();
   const id = nanoid();
 
   db.prepare(
-    "INSERT INTO engines (id, user_id, name, binary_path) VALUES (?, ?, ?, ?)",
-  ).run(id, userId, name, binaryPath);
+    "INSERT INTO engines (id, user_id, name, binary_path, visibility) VALUES (?, ?, ?, ?, ?)",
+  ).run(id, userId, name, binaryPath, visibility);
 
   return getEngineById(id)!;
 }
@@ -71,9 +74,18 @@ export function getEnginesByUser(userId: string): Engine[] {
   const db = getDb();
   return db
     .prepare(
-      "SELECT * FROM engines WHERE user_id = ? OR user_id = '__system__' ORDER BY user_id = '__system__' DESC, uploaded_at DESC",
+      "SELECT * FROM engines WHERE user_id = ? ORDER BY uploaded_at DESC",
     )
     .all(userId) as Engine[];
+}
+
+export function getVisibleEngines(): Engine[] {
+  const db = getDb();
+  return db
+    .prepare(
+      "SELECT * FROM engines WHERE visibility = 'public' ORDER BY user_id = '__system__' DESC, uploaded_at DESC",
+    )
+    .all() as Engine[];
 }
 
 export function getEngineById(id: string): Engine | undefined {
@@ -81,6 +93,22 @@ export function getEngineById(id: string): Engine | undefined {
   return db
     .prepare("SELECT * FROM engines WHERE id = ?")
     .get(id) as Engine | undefined;
+}
+
+export function isEngineReferenced(id: string): boolean {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `
+        SELECT EXISTS(
+          SELECT 1 FROM tournament_entries WHERE engine_id = ?
+          UNION ALL
+          SELECT 1 FROM games WHERE red_engine_id = ? OR black_engine_id = ?
+        ) as in_use
+      `,
+    )
+    .get(id, id, id) as { in_use: number };
+  return row.in_use === 1;
 }
 
 export function deleteEngine(id: string): void {
@@ -111,6 +139,7 @@ export function getLeaderboard(): (Engine & { owner: string })[] {
 // ── Tournaments ────────────────────────────────────────────────────────
 
 export function createTournament(
+  ownerId: string,
   name: string,
   timeControlBase: number,
   timeControlInc: number,
@@ -120,8 +149,8 @@ export function createTournament(
   const id = nanoid();
 
   db.prepare(
-    "INSERT INTO tournaments (id, name, time_control_base, time_control_inc, rounds) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, name, timeControlBase, timeControlInc, rounds);
+    "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds);
 
   return getTournamentById(id)!;
 }

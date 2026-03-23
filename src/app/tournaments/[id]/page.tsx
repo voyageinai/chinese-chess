@@ -31,6 +31,7 @@ import { Play, Plus } from "lucide-react";
 
 interface Tournament {
   id: string;
+  owner_id: string;
   name: string;
   status: "pending" | "running" | "finished";
   time_control_base: number;
@@ -277,6 +278,9 @@ export default function TournamentDetailPage() {
   // Engines not yet added to tournament
   const entryIds = new Set(entries.map((e) => e.engine_id));
   const availableEngines = userEngines.filter((e) => !entryIds.has(e.id));
+  const canManageTournament =
+    !!user &&
+    (user.role === "admin" || user.id === tournament.owner_id);
 
   // Sort entries by score
   const sortedEntries = [...entries].sort((a, b) => b.score - a.score);
@@ -309,8 +313,8 @@ export default function TournamentDetailPage() {
         </p>
       </div>
 
-      {/* Admin Controls */}
-      {user && tournament.status === "pending" && (
+      {/* Tournament Controls */}
+      {canManageTournament && tournament.status === "pending" && (
         <Card>
           <CardHeader>
             <CardTitle className="font-brush text-lg">赛事管理</CardTitle>
@@ -341,7 +345,7 @@ export default function TournamentDetailPage() {
                 ) : (
                   <p className="text-sm text-ink-muted py-1">
                     {user
-                      ? "没有可用引擎，请先上传。"
+                      ? "没有可用公开引擎，请先上传或等待其他用户上传。"
                       : "请先登录。"}
                   </p>
                 )}
@@ -359,26 +363,23 @@ export default function TournamentDetailPage() {
               <p className="text-sm text-destructive">{addError}</p>
             )}
 
-            {/* Start Tournament (admin only) */}
-            {user.role === "admin" && (
-              <div>
-                <Button
-                  onClick={handleStartTournament}
-                  disabled={starting || entries.length < 2}
-                >
-                  <Play className="w-4 h-4" data-icon="inline-start" />
-                  {starting ? "启动中..." : "开始比赛"}
-                </Button>
-                {entries.length < 2 && (
-                  <p className="text-xs text-ink-muted mt-1">
-                    至少需要 2 个引擎才能开始。
-                  </p>
-                )}
-                {startError && (
-                  <p className="text-sm text-destructive mt-1">{startError}</p>
-                )}
-              </div>
-            )}
+            <div>
+              <Button
+                onClick={handleStartTournament}
+                disabled={starting || entries.length < 2}
+              >
+                <Play className="w-4 h-4" data-icon="inline-start" />
+                {starting ? "启动中..." : "开始比赛"}
+              </Button>
+              {entries.length < 2 && (
+                <p className="text-xs text-ink-muted mt-1">
+                  至少需要 2 个引擎才能开始。
+                </p>
+              )}
+              {startError && (
+                <p className="text-sm text-destructive mt-1">{startError}</p>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS engines (
   user_id TEXT NOT NULL REFERENCES users(id),
   name TEXT NOT NULL,
   binary_path TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'public',
   elo REAL NOT NULL DEFAULT 1500,
   games_played INTEGER NOT NULL DEFAULT 0,
   uploaded_at INTEGER NOT NULL DEFAULT (unixepoch())
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS engines (
 
 CREATE TABLE IF NOT EXISTS tournaments (
   id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id),
   name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   time_control_base INTEGER NOT NULL,

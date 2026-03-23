@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { rm } from "fs/promises";
 import path from "path";
 import { getCurrentUser } from "@/lib/auth";
-import { getEngineById, deleteEngine } from "@/db/queries";
+import { getEngineById, deleteEngine, isEngineReferenced } from "@/db/queries";
 
 export async function GET(
   _request: Request,
@@ -57,6 +57,13 @@ export async function DELETE(
       return NextResponse.json(
         { error: "Forbidden" },
         { status: 403 },
+      );
+    }
+
+    if (isEngineReferenced(id)) {
+      return NextResponse.json(
+        { error: "Engine is already used by tournaments or games and cannot be deleted" },
+        { status: 409 },
       );
     }
 
