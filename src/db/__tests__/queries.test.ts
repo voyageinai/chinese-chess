@@ -68,7 +68,7 @@ describe("Users", () => {
     const fetched = getUserById(user.id);
     expect(fetched).toBeDefined();
     expect(fetched!.username).toBe("alice");
-    expect((fetched as Record<string, unknown>)["password"]).toBeUndefined();
+    expect((fetched as unknown as Record<string, unknown>)["password"]).toBeUndefined();
   });
 });
 
