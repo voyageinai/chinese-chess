@@ -39,4 +39,7 @@ next-env.d.ts
 # project-specific
 .superpowers/
 cnchess.db
+cnchess.db-shm
+cnchess.db-wal
 data/
+.playwright-mcp/
