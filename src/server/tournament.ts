@@ -2,7 +2,9 @@ import { EventEmitter } from "events";
 import { Match, type MatchConfig, type MatchResult } from "./match";
 import { calculateElo } from "./elo";
 import * as queries from "@/db/queries";
+import { getTournaments } from "@/db/queries";
 import type { Engine, Tournament, TournamentEntry } from "@/lib/types";
+import type { WsHub } from "./ws";
 
 // ---------------------------------------------------------------------------
 // Pairing generation
@@ -78,34 +80,44 @@ export class TournamentRunner extends EventEmitter {
       engines.set(eid, engine);
     }
 
-    // Generate pairings
-    const pairings = generateRoundRobinPairings(engineIds, tournament.rounds);
+    // Check for existing games (resume after restart) or create new ones
+    let existingGames = queries.getGamesByTournament(this.tournamentId);
 
-    // Create Game records in DB for all pairings
-    const gameIds: string[] = [];
-    for (const pairing of pairings) {
-      const game = queries.createGame(
-        this.tournamentId,
-        pairing.red,
-        pairing.black,
-      );
-      gameIds.push(game.id);
+    if (existingGames.length === 0) {
+      // Fresh start: generate pairings and create game records
+      const pairings = generateRoundRobinPairings(engineIds, tournament.rounds);
+      for (const pairing of pairings) {
+        queries.createGame(this.tournamentId, pairing.red, pairing.black);
+      }
+      existingGames = queries.getGamesByTournament(this.tournamentId);
     }
 
-    // Track scores for each engine (tournament points: win=1, draw=0.5, loss=0)
+    // Track scores from already-completed games
     const scores = new Map<string, number>();
     for (const eid of engineIds) {
       scores.set(eid, 0);
     }
+    for (const g of existingGames) {
+      if (g.result) {
+        if (g.result === "red") {
+          scores.set(g.red_engine_id, (scores.get(g.red_engine_id) ?? 0) + 1);
+        } else if (g.result === "black") {
+          scores.set(g.black_engine_id, (scores.get(g.black_engine_id) ?? 0) + 1);
+        } else {
+          scores.set(g.red_engine_id, (scores.get(g.red_engine_id) ?? 0) + 0.5);
+          scores.set(g.black_engine_id, (scores.get(g.black_engine_id) ?? 0) + 0.5);
+        }
+      }
+    }
 
-    // Run matches sequentially (respecting MAX_CONCURRENT_MATCHES = 1)
-    for (let i = 0; i < pairings.length; i++) {
+    // Run unfinished games sequentially
+    for (const game of existingGames) {
       if (this.aborted) break;
+      if (game.result) continue; // Already finished, skip
 
-      const pairing = pairings[i];
-      const gameId = gameIds[i];
-      const redEngine = engines.get(pairing.red)!;
-      const blackEngine = engines.get(pairing.black)!;
+      const gameId = game.id;
+      const redEngine = engines.get(game.red_engine_id)!;
+      const blackEngine = engines.get(game.black_engine_id)!;
 
       // Mark game as started
       queries.updateGameStarted(gameId);
@@ -157,8 +169,8 @@ export class TournamentRunner extends EventEmitter {
       );
 
       // Update Elo ratings
-      const redEngineData = engines.get(pairing.red)!;
-      const blackEngineData = engines.get(pairing.black)!;
+      const redEngineData = engines.get(game.red_engine_id)!;
+      const blackEngineData = engines.get(game.black_engine_id)!;
 
       let scoreA: number; // red's score
       if (result.result === "red") {
@@ -179,7 +191,7 @@ export class TournamentRunner extends EventEmitter {
       redEngineData.elo = Math.round(newRedElo);
       redEngineData.games_played++;
       queries.updateEngineElo(
-        pairing.red,
+        game.red_engine_id,
         redEngineData.elo,
         redEngineData.games_played,
       );
@@ -187,34 +199,34 @@ export class TournamentRunner extends EventEmitter {
       blackEngineData.elo = Math.round(newBlackElo);
       blackEngineData.games_played++;
       queries.updateEngineElo(
-        pairing.black,
+        game.black_engine_id,
         blackEngineData.elo,
         blackEngineData.games_played,
       );
 
       // Update tournament scores
-      const redScore = scores.get(pairing.red)!;
-      const blackScore = scores.get(pairing.black)!;
+      const redScore = scores.get(game.red_engine_id)!;
+      const blackScore = scores.get(game.black_engine_id)!;
 
       if (result.result === "red") {
-        scores.set(pairing.red, redScore + 1);
+        scores.set(game.red_engine_id, redScore + 1);
       } else if (result.result === "black") {
-        scores.set(pairing.black, blackScore + 1);
+        scores.set(game.black_engine_id, blackScore + 1);
       } else {
-        scores.set(pairing.red, redScore + 0.5);
-        scores.set(pairing.black, blackScore + 0.5);
+        scores.set(game.red_engine_id, redScore + 0.5);
+        scores.set(game.black_engine_id, blackScore + 0.5);
       }
 
       // Update entry scores in DB
       queries.updateTournamentEntry(
         this.tournamentId,
-        pairing.red,
-        scores.get(pairing.red)!,
+        game.red_engine_id,
+        scores.get(game.red_engine_id)!,
       );
       queries.updateTournamentEntry(
         this.tournamentId,
-        pairing.black,
-        scores.get(pairing.black)!,
+        game.black_engine_id,
+        scores.get(game.black_engine_id)!,
       );
 
       // Emit game_end
@@ -247,5 +259,36 @@ export class TournamentRunner extends EventEmitter {
 
   abort(): void {
     this.aborted = true;
+  }
+}
+
+/**
+ * Resume tournaments that were interrupted by a server restart.
+ * Resets stuck games (started but not finished) and re-runs them.
+ */
+export function resumeRunningTournaments(hub: WsHub): void {
+  const tournaments = getTournaments().filter((t) => t.status === "running");
+  if (tournaments.length === 0) return;
+
+  for (const t of tournaments) {
+    // Reset any games that were mid-flight (started but no result)
+    // so the runner will re-play them
+    const games = queries.getGamesByTournament(t.id);
+    for (const g of games) {
+      if (g.started_at && !g.result) {
+        queries.resetGameStarted(g.id);
+        console.log(`[resume] Reset interrupted game ${g.id} for replay`);
+      }
+    }
+
+    // Re-run: set back to pending so run() picks up unfinished games
+    // Actually run() already handles existing games, just restart it
+    console.log(`[resume] Resuming tournament "${t.name}" (${t.id})`);
+    const runner = new TournamentRunner(t.id);
+    runner.on("move", (msg) => hub.broadcast(msg));
+    runner.on("game_start", (msg) => hub.broadcast(msg));
+    runner.on("game_end", (msg) => hub.broadcast(msg));
+    runner.on("tournament_end", (msg) => hub.broadcast(msg));
+    runner.run().catch((err) => console.error("[resume] Tournament error:", err));
   }
 }

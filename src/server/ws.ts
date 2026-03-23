@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import type { WsMessage } from "@/lib/types";
 
-class WsHub {
+export class WsHub {
   private wss: WebSocketServer | null = null;
   private gameSubscribers = new Map<string, Set<WebSocket>>();
 

@@ -2,6 +2,7 @@ import { createServer } from "http";
 import { parse } from "url";
 import next from "next";
 import { wsHub } from "./src/server/ws";
+import { resumeRunningTournaments } from "./src/server/tournament";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -20,5 +21,7 @@ app.prepare().then(() => {
 
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
+    // Resume any tournaments that were interrupted by a restart
+    resumeRunningTournaments(wsHub);
   });
 });
