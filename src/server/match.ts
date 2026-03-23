@@ -129,11 +129,10 @@ export class Match extends EventEmitter {
           );
         }
 
-        // Build position command from move history
-        const posCmd =
-          gameState.moveHistory.length === 0
-            ? `position fen ${INITIAL_FEN}`
-            : `position fen ${INITIAL_FEN} moves ${gameState.moveHistory.join(" ")}`;
+        // Build position command using current FEN (avoids coordinate system
+        // mismatches between engines that use different rank numbering)
+        const currentFen = serializeFen(gameState);
+        const posCmd = `position fen ${currentFen}`;
 
         // Build go options: in Chinese chess UCI, red = white (wtime/winc)
         const goOptions: GoOptions = {
@@ -197,8 +196,8 @@ export class Match extends EventEmitter {
 
         const uciMove = goResult.bestmove;
 
-        // Validate move format
-        if (!uciMove || uciMove.length < 4) {
+        // Validate move format (4 chars for 0-based "h2e2", 4-6 for 1-based "h3e3" or "a10b10")
+        if (!uciMove || uciMove.length < 4 || !/^[a-i]\d{1,2}[a-i]\d{1,2}$/.test(uciMove)) {
           return this.buildResult(
             currentTurn === "red" ? "black" : "red",
             `${currentTurn} engine returned invalid move: ${uciMove}`,
@@ -208,9 +207,8 @@ export class Match extends EventEmitter {
           );
         }
 
-        // Parse the UCI move
-        const fromSq = uciToSquare(uciMove.slice(0, 2));
-        const toSq = uciToSquare(uciMove.slice(2, 4));
+        // Parse the UCI move using the engine's coordinate system
+        const { from: fromSq, to: toSq } = engine.uciMoveToSquares(uciMove);
 
         // Validate move legality
         if (!isLegalMove(gameState, fromSq, toSq)) {
@@ -240,9 +238,12 @@ export class Match extends EventEmitter {
           evalScore = -evalScore;
         }
 
+        // Normalize move to 0-based UCI format (a0-i9) for storage and frontend
+        const canonicalMove = squareToUci(fromSq) + squareToUci(toSq);
+
         // Record the stored move
         const storedMove: StoredMove = {
-          move: uciMove,
+          move: canonicalMove,
           fen: newFen,
           time_ms: elapsed,
           eval: evalScore,
@@ -252,7 +253,7 @@ export class Match extends EventEmitter {
         // Emit move event for WebSocket
         this.emit("move", {
           gameId,
-          move: uciMove,
+          move: canonicalMove,
           fen: newFen,
           eval: evalScore,
           redTime,

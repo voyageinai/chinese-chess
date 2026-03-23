@@ -120,8 +120,8 @@ export class TournamentRunner extends EventEmitter {
       const matchConfig: MatchConfig = {
         redEnginePath: redEngine.binary_path,
         blackEnginePath: blackEngine.binary_path,
-        timeBase: tournament.time_control_base,
-        timeInc: tournament.time_control_inc,
+        timeBase: tournament.time_control_base * 1000, // DB stores seconds, UCI needs ms
+        timeInc: tournament.time_control_inc * 1000,
         gameId,
       };
 
