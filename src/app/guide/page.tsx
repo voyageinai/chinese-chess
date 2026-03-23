@@ -143,7 +143,7 @@ function Step({
 function BoardDiagram() {
   const lines = [
     "  a b c d e f g h i",
-    "9 r h e a k a e h r   ← 黑方",
+    "9 r n b a k a b n r   ← 黑方",
     "8 · · · · · · · · ·",
     "7 · c · · · · · c ·",
     "6 p · p · p · p · p",
@@ -152,7 +152,7 @@ function BoardDiagram() {
     "3 P · P · P · P · P",
     "2 · C · · · · · C ·",
     "1 · · · · · · · · ·",
-    "0 R H E A K A E H R   ← 红方",
+    "0 R N B A K A B N R   ← 红方",
   ];
   return (
     <div className="bg-paper-300/30 border border-paper-300 rounded-lg p-4 overflow-x-auto">
@@ -160,13 +160,13 @@ function BoardDiagram() {
         {lines.map((line, i) => (
           <div key={i}>
             {line.split("").map((ch, j) => {
-              if ("rheackp".includes(ch))
+              if ("rnbackp".includes(ch))
                 return (
                   <span key={j} className="text-ink font-bold">
                     {ch}
                   </span>
                 );
-              if ("RHEACKP".includes(ch))
+              if ("RNBACKP".includes(ch))
                 return (
                   <span key={j} className="text-vermilion font-bold">
                     {ch}
@@ -197,9 +197,9 @@ function BoardDiagram() {
 const PIECES = [
   { letter: "K/k", red: "帅", black: "将", name: "King" },
   { letter: "A/a", red: "仕", black: "士", name: "Advisor" },
-  { letter: "E/e", red: "相", black: "象", name: "Elephant" },
+  { letter: "B/b", red: "相", black: "象", name: "Bishop" },
   { letter: "R/r", red: "车", black: "车", name: "Rook" },
-  { letter: "H/h", red: "马", black: "马", name: "Horse" },
+  { letter: "N/n", red: "马", black: "马", name: "Knight" },
   { letter: "C/c", red: "炮", black: "炮", name: "Cannon" },
   { letter: "P/p", red: "兵", black: "卒", name: "Pawn" },
 ];
@@ -210,7 +210,7 @@ export default function GuidePage() {
 """最简象棋引擎 — 随机走子"""
 import sys, random
 
-INIT_FEN = "rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RHEAKAEHR w - - 0 1"
+INIT_FEN = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"
 
 def main():
     for line in sys.stdin:
@@ -416,7 +416,7 @@ func main() {
                 2. 对弈
               </p>
               <ProtocolMessage from="platform">
-                position startpos
+                {`position fen rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1`}
               </ProtocolMessage>
               <ProtocolMessage from="platform">
                 go wtime 300000 btime 300000 winc 3000 binc 3000
@@ -426,7 +426,7 @@ func main() {
               </ProtocolMessage>
 
               <ProtocolMessage from="platform">
-                position startpos moves h2e2 h9g7
+                {`position fen rnbakabnr/9/1c5c1/p1p1p1p1p/9/4C4/9/P1P1P1P1P/1C5c1/9/RNBAKABNR b - - 1 1`}
               </ProtocolMessage>
               <ProtocolMessage from="platform">
                 go wtime 298500 btime 297000 winc 3000 binc 3000
@@ -614,6 +614,14 @@ func main() {
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="w-4 h-4 mt-0.5 text-vermilion shrink-0" />
                   <span>
+                    <strong>FEN 棋子字母用 UCI 标准</strong> —
+                    马=<code className="font-mono text-xs bg-paper-300/50 px-1 rounded">N/n</code>，
+                    象=<code className="font-mono text-xs bg-paper-300/50 px-1 rounded">B/b</code>（不是 H/E）
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 mt-0.5 text-vermilion shrink-0" />
+                  <span>
                     <strong>bestmove 必须是合法走子</strong> —
                     非法走法会直接判负
                   </span>
@@ -654,7 +662,7 @@ uci
 isready
 # 期望看到: readyok
 
-position startpos
+position fen rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1
 go wtime 300000 btime 300000 winc 3000 binc 3000
 # 期望看到: bestmove xxxxx
 
@@ -709,14 +717,9 @@ quit`}
               desc: "检查就绪，回复 readyok",
             },
             {
-              cmd: "position startpos [moves ...]",
+              cmd: "position fen <FEN>",
               dir: "平台 → 引擎",
-              desc: "设置局面，startpos = 初始局面，后跟走法历史",
-            },
-            {
-              cmd: "position fen <FEN> [moves ...]",
-              dir: "平台 → 引擎",
-              desc: "用 FEN 字符串设置任意局面",
+              desc: "用 FEN 设置当前局面（本平台每步都发完整 FEN，不用 startpos/moves）",
             },
             {
               cmd: "go wtime X btime Y winc Z binc W",
@@ -766,7 +769,7 @@ quit`}
             },
             {
               q: "如何从 position 命令里解析棋盘状态？",
-              a: "position startpos moves h2e2 h9g7 表示从初始局面开始，按顺序走了 h2e2 和 h9g7 两步。你需要维护一个棋盘数据结构，从初始 FEN 开始逐步应用走法。",
+              a: "本平台每步发送 position fen <当前局面FEN>，你只需解析 FEN 字符串即可还原棋盘。FEN 格式：棋子布局/走子方/…，棋子字母用 UCI 标准：R(车) N(马) B(象) A(仕) K(帅) C(炮) P(兵)，大写红方，小写黑方。",
             },
             {
               q: "score cp 是什么意思？",
