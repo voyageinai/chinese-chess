@@ -7,6 +7,8 @@ import type {
   Tournament,
   TournamentEntry,
   Game,
+  AuditLog,
+  InviteCode,
 } from "@/lib/types";
 
 // ── Users ──────────────────────────────────────────────────────────────
@@ -20,15 +22,18 @@ export function createUser(username: string, passwordHash: string): User {
   const db = getDb();
   const id = nanoid();
 
-  // First user auto-becomes admin
-  const count = db
-    .prepare("SELECT COUNT(*) as cnt FROM users WHERE id != '__system__'")
-    .get() as { cnt: number };
-  const role = count.cnt === 0 ? "admin" : "user";
+  // Wrap in transaction to prevent race condition on first-user admin assignment
+  const insertUser = db.transaction(() => {
+    const count = db
+      .prepare("SELECT COUNT(*) as cnt FROM users WHERE id != '__system__'")
+      .get() as { cnt: number };
+    const role = count.cnt === 0 ? "admin" : "user";
 
-  db.prepare(
-    "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
-  ).run(id, username, passwordHash, role);
+    db.prepare(
+      "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
+    ).run(id, username, passwordHash, role);
+  });
+  insertUser();
 
   return getUserById(id)!;
 }
@@ -174,7 +179,7 @@ export function updateTournamentStatus(
   status: Tournament["status"],
 ): void {
   const db = getDb();
-  if (status === "finished") {
+  if (status === "finished" || status === "cancelled") {
     db.prepare(
       "UPDATE tournaments SET status = ?, finished_at = unixepoch() WHERE id = ?",
     ).run(status, id);
@@ -307,4 +312,182 @@ export function getActiveGames(): Game[] {
       "SELECT * FROM games WHERE started_at IS NOT NULL AND finished_at IS NULL",
     )
     .all() as Game[];
+}
+
+// ── User Management ───────────────────────────────────────────────────
+
+export function getAllUsers(): User[] {
+  const db = getDb();
+  return db
+    .prepare(
+      "SELECT id, username, role, status, created_at FROM users WHERE id != '__system__' ORDER BY created_at DESC",
+    )
+    .all() as User[];
+}
+
+export function updateUserRole(id: string, role: "admin" | "user"): void {
+  const db = getDb();
+  db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
+}
+
+export function updateUserStatus(id: string, status: "active" | "banned"): void {
+  const db = getDb();
+  db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, id);
+}
+
+export function countActiveAdmins(): number {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT COUNT(*) as cnt FROM users WHERE role = 'admin' AND status = 'active' AND id != '__system__'",
+    )
+    .get() as { cnt: number };
+  return row.cnt;
+}
+
+// ── Engine Management ─────────────────────────────────────────────────
+
+export function getAllEngines(): Engine[] {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM engines ORDER BY uploaded_at DESC")
+    .all() as Engine[];
+}
+
+export function updateEngineStatus(id: string, status: "active" | "disabled"): void {
+  const db = getDb();
+  db.prepare("UPDATE engines SET status = ? WHERE id = ?").run(status, id);
+}
+
+// ── Tournament Management ─────────────────────────────────────────────
+
+export function deleteTournament(id: string): void {
+  const db = getDb();
+  const del = db.transaction(() => {
+    db.prepare("DELETE FROM games WHERE tournament_id = ?").run(id);
+    db.prepare("DELETE FROM tournament_entries WHERE tournament_id = ?").run(id);
+    db.prepare("DELETE FROM tournaments WHERE id = ?").run(id);
+  });
+  del();
+}
+
+// ── Audit Logs ────────────────────────────────────────────────────────
+
+export function createAuditLog(
+  action: string,
+  actorId: string,
+  targetType: string | null,
+  targetId: string | null,
+  details: Record<string, unknown>,
+): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO audit_logs (id, action, actor_id, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(nanoid(), action, actorId, targetType, targetId, JSON.stringify(details));
+}
+
+export function getAuditLogs(opts?: {
+  action?: string;
+  actorId?: string;
+  limit?: number;
+  offset?: number;
+}): AuditLog[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (opts?.action) {
+    conditions.push("action = ?");
+    params.push(opts.action);
+  }
+  if (opts?.actorId) {
+    conditions.push("actor_id = ?");
+    params.push(opts.actorId);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const limit = opts?.limit ?? 100;
+  const offset = opts?.offset ?? 0;
+
+  return db
+    .prepare(
+      `SELECT * FROM audit_logs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as AuditLog[];
+}
+
+// ── Invite Codes ──────────────────────────────────────────────────────
+
+export function createInviteCode(
+  code: string,
+  createdBy: string,
+  expiresAt: number,
+): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO invite_codes (code, created_by, expires_at) VALUES (?, ?, ?)",
+  ).run(code, createdBy, expiresAt);
+}
+
+export function getInviteCodes(): InviteCode[] {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM invite_codes ORDER BY created_at DESC")
+    .all() as InviteCode[];
+}
+
+export function getInviteCodeByCode(code: string): InviteCode | undefined {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM invite_codes WHERE code = ?")
+    .get(code) as InviteCode | undefined;
+}
+
+export function useInviteCode(code: string, userId: string): boolean {
+  const db = getDb();
+  const result = db
+    .prepare(
+      "UPDATE invite_codes SET used_by = ? WHERE code = ? AND used_by IS NULL AND expires_at > unixepoch()",
+    )
+    .run(userId, code);
+  return result.changes > 0;
+}
+
+export function deleteInviteCode(code: string): boolean {
+  const db = getDb();
+  const result = db
+    .prepare("DELETE FROM invite_codes WHERE code = ? AND used_by IS NULL")
+    .run(code);
+  return result.changes > 0;
+}
+
+// ── System Stats ──────────────────────────────────────────────────────
+
+export function getSystemStats(): {
+  userCount: number;
+  engineCount: number;
+  tournamentCount: number;
+  activeGameCount: number;
+} {
+  const db = getDb();
+  const users = db
+    .prepare("SELECT COUNT(*) as cnt FROM users WHERE id != '__system__'")
+    .get() as { cnt: number };
+  const engines = db
+    .prepare("SELECT COUNT(*) as cnt FROM engines")
+    .get() as { cnt: number };
+  const tournaments = db
+    .prepare("SELECT COUNT(*) as cnt FROM tournaments")
+    .get() as { cnt: number };
+  const activeGames = db
+    .prepare(
+      "SELECT COUNT(*) as cnt FROM games WHERE started_at IS NOT NULL AND finished_at IS NULL",
+    )
+    .get() as { cnt: number };
+  return {
+    userCount: users.cnt,
+    engineCount: engines.cnt,
+    tournamentCount: tournaments.cnt,
+    activeGameCount: activeGames.cnt,
+  };
 }

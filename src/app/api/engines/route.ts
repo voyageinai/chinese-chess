@@ -5,6 +5,8 @@ import path from "path";
 import { spawn } from "child_process";
 import { getCurrentUser } from "@/lib/auth";
 import { createEngine, getEnginesByUser, getVisibleEngines } from "@/db/queries";
+import { sanitizeEngine, sanitizeEngines } from "@/server/dto";
+import { logAudit } from "@/server/audit";
 
 const MAX_FILE_SIZE = parseInt(process.env.MAX_ENGINE_SIZE || "52428800", 10); // 50MB default
 const SCRIPT_EXTENSIONS = [".py", ".js"];
@@ -79,7 +81,7 @@ export async function GET(request: Request) {
     const scope = url.searchParams.get("scope");
     const engines =
       scope === "owned" ? getEnginesByUser(user.id) : getVisibleEngines();
-    return NextResponse.json({ engines });
+    return NextResponse.json({ engines: sanitizeEngines(engines) });
   } catch (error) {
     console.error("Get engines error:", error);
     return NextResponse.json(
@@ -159,7 +161,12 @@ export async function POST(request: Request) {
 
     const engine = createEngine(user.id, name.trim(), binaryPath, "public");
 
-    return NextResponse.json({ engine }, { status: 201 });
+    logAudit("engine.upload", user.id, "engine", engine.id, {
+      name: name.trim(),
+      file_size: file.size,
+    });
+
+    return NextResponse.json({ engine: sanitizeEngine(engine) }, { status: 201 });
   } catch (error) {
     console.error("Upload engine error:", error);
     return NextResponse.json(

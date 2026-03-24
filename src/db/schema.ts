@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
+  status TEXT NOT NULL DEFAULT 'active',
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS engines (
   name TEXT NOT NULL,
   binary_path TEXT NOT NULL,
   visibility TEXT NOT NULL DEFAULT 'public',
+  status TEXT NOT NULL DEFAULT 'active',
   elo REAL NOT NULL DEFAULT 1500,
   games_played INTEGER NOT NULL DEFAULT 0,
   uploaded_at INTEGER NOT NULL DEFAULT (unixepoch())
@@ -49,5 +51,26 @@ CREATE TABLE IF NOT EXISTS games (
   black_time_left INTEGER,
   started_at INTEGER,
   finished_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  details TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at);
+
+CREATE TABLE IF NOT EXISTS invite_codes (
+  code TEXT PRIMARY KEY,
+  created_by TEXT NOT NULL,
+  used_by TEXT,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 `;

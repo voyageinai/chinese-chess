@@ -39,14 +39,18 @@ export interface StoredMove {
 }
 
 // -- API / DB types --
+export type UserStatus = "active" | "banned";
+
 export interface User {
   id: string;
   username: string;
   role: "admin" | "user";
+  status: UserStatus;
   created_at: number;
 }
 
 export type EngineVisibility = "public" | "private";
+export type EngineStatus = "active" | "disabled";
 
 export interface Engine {
   id: string;
@@ -54,6 +58,7 @@ export interface Engine {
   name: string;
   binary_path: string;
   visibility: EngineVisibility;
+  status: EngineStatus;
   elo: number;
   games_played: number;
   uploaded_at: number;
@@ -63,7 +68,7 @@ export interface Tournament {
   id: string;
   owner_id: string;
   name: string;
-  status: "pending" | "running" | "finished";
+  status: "pending" | "running" | "finished" | "cancelled";
   time_control_base: number;
   time_control_inc: number;
   rounds: number;
@@ -115,3 +120,23 @@ export type WsMessage =
     }
   | { type: "game_end"; gameId: string; result: "red" | "black" | "draw" }
   | { type: "tournament_end"; tournamentId: string };
+
+// -- Audit log --
+export interface AuditLog {
+  id: string;
+  action: string;
+  actor_id: string;
+  target_type: string | null;
+  target_id: string | null;
+  details: string | null; // JSON string
+  created_at: number;
+}
+
+// -- Invite code --
+export interface InviteCode {
+  code: string;
+  created_by: string;
+  used_by: string | null;
+  expires_at: number;
+  created_at: number;
+}

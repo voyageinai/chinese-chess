@@ -7,8 +7,10 @@ import {
   addEngineToTournament,
   getEngineById,
 } from "@/db/queries";
-import { TournamentRunner } from "@/server/tournament";
+import { TournamentRunner, registerRunner } from "@/server/tournament";
 import { wsHub } from "@/server/ws";
+import { denyUnauth, denyForbidden, canManageTournament, isAdmin } from "@/server/permissions";
+import { logAudit } from "@/server/audit";
 
 export async function GET(
   _request: Request,
@@ -44,12 +46,7 @@ export async function PUT(
 ) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 },
-      );
-    }
+    if (!user) return denyUnauth();
 
     const { id } = await params;
     const tournament = getTournamentById(id);
@@ -61,14 +58,7 @@ export async function PUT(
       );
     }
 
-    const canManageTournament =
-      tournament.owner_id === user.id || user.role === "admin";
-    if (!canManageTournament) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 },
-      );
-    }
+    if (!canManageTournament(user, tournament)) return denyForbidden();
 
     if (tournament.status !== "pending") {
       return NextResponse.json(
@@ -94,7 +84,7 @@ export async function PUT(
       );
     }
 
-    if (engine.visibility !== "public" && engine.user_id !== user.id && user.role !== "admin") {
+    if (engine.visibility !== "public" && engine.user_id !== user.id && !isAdmin(user)) {
       return NextResponse.json(
         { error: "Engine is not available for this tournament" },
         { status: 403 },
@@ -128,12 +118,7 @@ export async function POST(
 ) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 },
-      );
-    }
+    if (!user) return denyUnauth();
 
     const { id } = await params;
     const tournament = getTournamentById(id);
@@ -145,12 +130,7 @@ export async function POST(
       );
     }
 
-    if (tournament.owner_id !== user.id && user.role !== "admin") {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 },
-      );
-    }
+    if (!canManageTournament(user, tournament)) return denyForbidden();
 
     if (tournament.status !== "pending") {
       return NextResponse.json(
@@ -167,13 +147,23 @@ export async function POST(
       );
     }
 
-    // Start tournament in background
+    // Start tournament in background (registry prevents double-start)
     const runner = new TournamentRunner(id);
+    if (!registerRunner(id, runner)) {
+      return NextResponse.json(
+        { error: "Tournament is already running" },
+        { status: 409 },
+      );
+    }
     runner.on("move", (msg) => wsHub.broadcast(msg));
     runner.on("game_start", (msg) => wsHub.broadcast(msg));
     runner.on("game_end", (msg) => wsHub.broadcast(msg));
     runner.on("tournament_end", (msg) => wsHub.broadcast(msg));
     runner.run().catch((err) => console.error("Tournament error:", err));
+
+    logAudit("tournament.start", user.id, "tournament", id, {
+      engine_count: entries.length,
+    });
 
     return NextResponse.json({ success: true, message: "Tournament started" });
   } catch (error) {

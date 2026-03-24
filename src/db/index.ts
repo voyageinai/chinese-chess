@@ -90,6 +90,19 @@ function runMigrations(database: Database.Database): void {
       )
       .run(defaultOwnerId);
   }
+
+  // -- v3: Add status columns and new tables --
+  if (!hasColumn(database, "users", "status")) {
+    database.exec(
+      "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+    );
+  }
+
+  if (!hasColumn(database, "engines", "status")) {
+    database.exec(
+      "ALTER TABLE engines ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+    );
+  }
 }
 
 function seedDefaultEngines(database: Database.Database): void {

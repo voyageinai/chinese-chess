@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Swords, Trophy, Cpu, Home, LogIn, User, BookOpen } from "lucide-react";
+import { Swords, Trophy, Cpu, Home, LogIn, User, BookOpen, Shield } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "首页", icon: Home },
@@ -59,10 +59,25 @@ export function Navbar() {
           {checked && (
             <>
               {user ? (
-                <span className="flex items-center gap-1.5 text-sm text-ink-muted">
-                  <User className="w-4 h-4" />
-                  {user.username}
-                </span>
+                <>
+                  {user.role === "admin" && (
+                    <Link
+                      href="/admin"
+                      className={`flex items-center gap-1.5 text-sm transition-colors ${
+                        pathname.startsWith("/admin")
+                          ? "text-vermilion font-semibold"
+                          : "text-ink-muted hover:text-vermilion"
+                      }`}
+                    >
+                      <Shield className="w-4 h-4" />
+                      管理
+                    </Link>
+                  )}
+                  <span className="flex items-center gap-1.5 text-sm text-ink-muted">
+                    <User className="w-4 h-4" />
+                    {user.username}
+                  </span>
+                </>
               ) : (
                 <Link
                   href="/login"

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { hashPassword, signToken, validateInviteCode } from "@/server/auth";
-import { createUser, getUserByUsername } from "@/db/queries";
+import { createUser, getUserByUsername, getInviteCodeByCode, useInviteCode } from "@/db/queries";
+import { logAudit } from "@/server/audit";
 
 export async function POST(request: Request) {
   try {
@@ -27,7 +28,12 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!validateInviteCode(inviteCode)) {
+    // Check invite code: try DB codes first, then fall back to env var
+    const dbCode = getInviteCodeByCode(inviteCode);
+    const isDbCode = dbCode && !dbCode.used_by && dbCode.expires_at > Math.floor(Date.now() / 1000);
+    const isEnvCode = validateInviteCode(inviteCode);
+
+    if (!isDbCode && !isEnvCode) {
       return NextResponse.json(
         { error: "Invalid invite code" },
         { status: 403 },
@@ -44,6 +50,16 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(password);
     const user = createUser(username, passwordHash);
+
+    // Mark DB invite code as used (atomic — useInviteCode checks used_by IS NULL)
+    if (isDbCode) {
+      useInviteCode(inviteCode, user.id);
+    }
+
+    logAudit("user.register", user.id, "user", user.id, {
+      username,
+      invite_type: isDbCode ? "db" : "env",
+    });
 
     const token = signToken({ userId: user.id, role: user.role });
 

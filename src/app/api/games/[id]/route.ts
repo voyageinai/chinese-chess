@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGameById, getEngineById } from "@/db/queries";
+import { sanitizeEngine } from "@/server/dto";
 
 export async function GET(
   _request: Request,
@@ -21,8 +22,8 @@ export async function GET(
 
     return NextResponse.json({
       game,
-      redEngine: redEngine ?? null,
-      blackEngine: blackEngine ?? null,
+      redEngine: redEngine ? sanitizeEngine(redEngine) : null,
+      blackEngine: blackEngine ? sanitizeEngine(blackEngine) : null,
     });
   } catch (error) {
     console.error("Get game error:", error);

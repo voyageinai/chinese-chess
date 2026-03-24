@@ -44,6 +44,28 @@ export function generateRoundRobinPairings(
 
 const MAX_CONCURRENT_MATCHES = 1;
 
+// ── Runner Registry (module-level singleton) ──────────────────────────
+
+const runnerRegistry = new Map<string, TournamentRunner>();
+
+export function getRunner(tournamentId: string): TournamentRunner | undefined {
+  return runnerRegistry.get(tournamentId);
+}
+
+export function registerRunner(tournamentId: string, runner: TournamentRunner): boolean {
+  if (runnerRegistry.has(tournamentId)) return false; // already running
+  runnerRegistry.set(tournamentId, runner);
+  return true;
+}
+
+export function unregisterRunner(tournamentId: string): void {
+  runnerRegistry.delete(tournamentId);
+}
+
+export function getActiveRunners(): Map<string, TournamentRunner> {
+  return runnerRegistry;
+}
+
 export class TournamentRunner extends EventEmitter {
   private tournamentId: string;
   private aborted = false;
@@ -254,8 +276,15 @@ export class TournamentRunner extends EventEmitter {
       queries.updateTournamentEntry(this.tournamentId, engineId, score, rank);
     }
 
-    // Mark tournament as finished
-    queries.updateTournamentStatus(this.tournamentId, "finished");
+    // Mark tournament as finished or cancelled
+    if (this.aborted) {
+      queries.updateTournamentStatus(this.tournamentId, "cancelled");
+    } else {
+      queries.updateTournamentStatus(this.tournamentId, "finished");
+    }
+
+    // Clean up registry
+    unregisterRunner(this.tournamentId);
 
     // Emit tournament_end
     this.emit("tournament_end", { type: "tournament_end", tournamentId: this.tournamentId });
@@ -289,6 +318,7 @@ export function resumeRunningTournaments(hub: WsHub): void {
     // Actually run() already handles existing games, just restart it
     console.log(`[resume] Resuming tournament "${t.name}" (${t.id})`);
     const runner = new TournamentRunner(t.id);
+    registerRunner(t.id, runner);
     runner.on("move", (msg) => hub.broadcast(msg));
     runner.on("game_start", (msg) => hub.broadcast(msg));
     runner.on("game_end", (msg) => hub.broadcast(msg));

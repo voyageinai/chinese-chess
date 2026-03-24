@@ -9,5 +9,7 @@ export async function getCurrentUser(): Promise<User | null> {
   if (!token) return null;
   const payload = verifyToken(token);
   if (!payload) return null;
-  return getUserById(payload.userId) ?? null;
+  const user = getUserById(payload.userId) ?? null;
+  if (user?.status === "banned") return null;
+  return user;
 }

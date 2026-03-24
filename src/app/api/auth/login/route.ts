@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPassword, signToken } from "@/server/auth";
 import { getUserByUsername } from "@/db/queries";
+import { logAudit } from "@/server/audit";
 
 export async function POST(request: Request) {
   try {
@@ -28,6 +29,15 @@ export async function POST(request: Request) {
         { status: 401 },
       );
     }
+
+    if (userRow.status === "banned") {
+      return NextResponse.json(
+        { error: "账号已被封禁" },
+        { status: 403 },
+      );
+    }
+
+    logAudit("user.login", userRow.id, "user", userRow.id, { username });
 
     const token = signToken({ userId: userRow.id, role: userRow.role });
 

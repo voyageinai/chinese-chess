@@ -3,6 +3,9 @@ import { rm } from "fs/promises";
 import path from "path";
 import { getCurrentUser } from "@/lib/auth";
 import { getEngineById, deleteEngine, isEngineReferenced } from "@/db/queries";
+import { sanitizeEngine } from "@/server/dto";
+import { denyUnauth, denyForbidden, canManageEngine } from "@/server/permissions";
+import { logAudit } from "@/server/audit";
 
 export async function GET(
   _request: Request,
@@ -19,7 +22,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({ engine });
+    return NextResponse.json({ engine: sanitizeEngine(engine) });
   } catch (error) {
     console.error("Get engine error:", error);
     return NextResponse.json(
@@ -35,12 +38,7 @@ export async function DELETE(
 ) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 },
-      );
-    }
+    if (!user) return denyUnauth();
 
     const { id } = await params;
     const engine = getEngineById(id);
@@ -52,13 +50,7 @@ export async function DELETE(
       );
     }
 
-    // Only owner or admin can delete
-    if (engine.user_id !== user.id && user.role !== "admin") {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 },
-      );
-    }
+    if (!canManageEngine(user, engine)) return denyForbidden();
 
     if (isEngineReferenced(id)) {
       return NextResponse.json(
@@ -77,6 +69,11 @@ export async function DELETE(
 
     // Remove DB record
     deleteEngine(id);
+
+    logAudit("engine.delete", user.id, "engine", id, {
+      name: engine.name,
+      admin_action: engine.user_id !== user.id,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
