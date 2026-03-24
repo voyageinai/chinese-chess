@@ -145,8 +145,8 @@ export default function TournamentsPage() {
     try {
       let res: Response;
 
-      if (formFormat === "swiss") {
-        // Ranked mode → matchmaking API
+      if (formFormat === "swiss" || formFormat === "gauntlet") {
+        // Matchmaking mode (ranked / calibration) → quick-match API
         if (!rankedEngineId) {
           setFormError("请选择引擎");
           setCreating(false);
@@ -269,7 +269,7 @@ export default function TournamentsPage() {
                       ["round_robin", "循环赛", "每对引擎互相对弈"],
                       ["knockout", "淘汰赛", "输者淘汰，决出冠军"],
                       ["gauntlet", "定级赛", "挑战者 vs 多个对手"],
-                      ["swiss", "排位赛", "自动匹配（推荐用导航栏排位赛）"],
+                      ["swiss", "排位赛", "自动匹配对手"],
                     ] as const).map(([val, label, desc]) => (
                       <button
                         key={val}
@@ -289,8 +289,8 @@ export default function TournamentsPage() {
                     ))}
                   </div>
                 </div>
-                {formFormat === "swiss" ? (
-                  /* ── Ranked mode: pick own engine + game count ── */
+                {formFormat === "swiss" || formFormat === "gauntlet" ? (
+                  /* ── Matchmaking mode (ranked/calibration): pick own engine ── */
                   <>
                     <div className="space-y-1.5">
                       <Label>选择你的引擎</Label>
@@ -413,9 +413,11 @@ export default function TournamentsPage() {
                     ? "创建中..."
                     : formFormat === "swiss"
                       ? "开始排位"
-                      : selectedIds.size >= 2
-                        ? "创建并开始"
-                        : "创建"}
+                      : formFormat === "gauntlet"
+                        ? "开始定级"
+                        : selectedIds.size >= 2
+                          ? "创建并开始"
+                          : "创建"}
                 </Button>
               </form>
             </DialogContent>
