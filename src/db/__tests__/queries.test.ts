@@ -222,7 +222,7 @@ describe("Games", () => {
 
     // Finish game
     const movesJson = JSON.stringify([{ move: "h2e2", fen: "...", time_ms: 100, eval: null }]);
-    updateGameResult(game.id, "red", movesJson, 50, 45);
+    updateGameResult(game.id, "red", "Checkmate", movesJson, 50, 45);
 
     const finished = getGameById(game.id)!;
     expect(finished.result).toBe("red");

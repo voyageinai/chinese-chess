@@ -174,11 +174,11 @@ export class TournamentRunner extends EventEmitter {
       let result: MatchResult;
       try {
         result = await match.run();
-      } catch {
-        // If match throws, treat it as a draw (shouldn't normally happen)
+      } catch (err) {
+        console.error(`[tournament] Match ${gameId} threw:`, err);
         result = {
           result: "draw",
-          reason: "Match error",
+          reason: "Internal error",
           moves: [],
           redTimeLeft: 0,
           blackTimeLeft: 0,
@@ -189,6 +189,7 @@ export class TournamentRunner extends EventEmitter {
       queries.updateGameResult(
         gameId,
         result.result,
+        result.reason,
         JSON.stringify(result.moves),
         result.redTimeLeft,
         result.blackTimeLeft,
@@ -260,6 +261,7 @@ export class TournamentRunner extends EventEmitter {
         type: "game_end",
         gameId,
         result: result.result,
+        reason: result.reason,
       });
     }
 

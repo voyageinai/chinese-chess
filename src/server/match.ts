@@ -13,6 +13,66 @@ import { updateGameMoves } from "@/db/queries";
 import type { Color, StoredMove, GameState, Move } from "@/lib/types";
 import { EventEmitter } from "events";
 
+// Exported for testing
+export interface PlyMeta {
+  key: string;
+  mover: Color;
+  gaveCheck: boolean;
+}
+
+export type RepetitionVerdict =
+  | { result: "red" | "black"; reason: string }
+  | { result: "draw"; reason: string }
+  | null; // no repetition yet
+
+/**
+ * Analyze whether a threefold position repetition constitutes perpetual check.
+ * Returns a verdict if the position has occurred 3+ times, null otherwise.
+ */
+export function adjudicateRepetition(
+  occurrences: number[],
+  plyHistory: PlyMeta[],
+): RepetitionVerdict {
+  if (occurrences.length < 3) return null;
+
+  // Analyze the last cycle (between 2nd-to-last and last occurrence)
+  const cycleStart = occurrences[occurrences.length - 2];
+  const cycleEnd = occurrences[occurrences.length - 1];
+
+  let redCheckedEveryMove = true;
+  let blackCheckedEveryMove = true;
+  let redMoveCount = 0;
+  let blackMoveCount = 0;
+
+  for (let p = cycleStart + 1; p <= cycleEnd; p++) {
+    const meta = plyHistory[p - 1]; // plyHistory[0] = ply 1
+    if (meta.mover === "red") {
+      redMoveCount++;
+      if (!meta.gaveCheck) redCheckedEveryMove = false;
+    } else {
+      blackMoveCount++;
+      if (!meta.gaveCheck) blackCheckedEveryMove = false;
+    }
+  }
+
+  const redPerpetual = redCheckedEveryMove && redMoveCount > 0;
+  const blackPerpetual = blackCheckedEveryMove && blackMoveCount > 0;
+
+  if (redPerpetual && !blackPerpetual) {
+    return { result: "black", reason: "Red lost by perpetual check" };
+  }
+  if (blackPerpetual && !redPerpetual) {
+    return { result: "red", reason: "Black lost by perpetual check" };
+  }
+  return {
+    result: "draw",
+    reason:
+      redPerpetual && blackPerpetual
+        ? "Mutual perpetual check"
+        : "Threefold repetition",
+  };
+}
+
 export interface MatchConfig {
   redEnginePath: string;
   blackEnginePath: string;
@@ -49,10 +109,9 @@ export class Match extends EventEmitter {
     const storedMoves: StoredMove[] = [];
     let gameState = parseFen(INITIAL_FEN);
 
-    // Position repetition tracking (key = FEN board+turn portions)
-    const positionCounts = new Map<string, number>();
-    // Consecutive check tracking for perpetual check rule
-    const consecutiveChecks = { red: 0, black: 0 };
+    // Unified repetition tracking
+    const plyHistory: PlyMeta[] = [];
+    const occurrencesByKey = new Map<string, number[]>();
 
     const positionKey = (state: GameState): string => {
       const fen = serializeFen(state);
@@ -61,9 +120,9 @@ export class Match extends EventEmitter {
       return parts[0] + " " + parts[1];
     };
 
-    // Record initial position
+    // Record initial position as ply 0
     const initKey = positionKey(gameState);
-    positionCounts.set(initKey, 1);
+    occurrencesByKey.set(initKey, [0]);
 
     try {
       // 1. Init both engines
@@ -188,13 +247,6 @@ export class Match extends EventEmitter {
           );
         }
 
-        // Add increment after the move
-        if (currentTurn === "red") {
-          redTime += timeInc;
-        } else {
-          blackTime += timeInc;
-        }
-
         const uciMove = goResult.bestmove;
 
         // Validate move format (4 chars for 0-based "h2e2", 4-6 for 1-based "h3e3" or "a10b10")
@@ -220,6 +272,13 @@ export class Match extends EventEmitter {
             redTime,
             blackTime,
           );
+        }
+
+        // Add increment after move validation (not before, to avoid inflating time on illegal moves)
+        if (currentTurn === "red") {
+          redTime += timeInc;
+        } else {
+          blackTime += timeInc;
         }
 
         // Build the Move object for applyMove
@@ -283,9 +342,10 @@ export class Match extends EventEmitter {
         }
 
         // Stalemate: the side to move has no legal moves but is not in check
+        // In xiangqi, stalemate = stalemated side loses (WXF 2018 Article 3.1.A.II)
         if (isStalemate(gameState)) {
           return this.buildResult(
-            "draw",
+            currentTurn,
             "Stalemate",
             storedMoves,
             redTime,
@@ -293,34 +353,25 @@ export class Match extends EventEmitter {
           );
         }
 
-        // Perpetual check detection:
-        // Track consecutive checks by the side that just moved
-        const opponentColor = gameState.turn; // side to move next
-        if (isInCheck(gameState, opponentColor)) {
-          consecutiveChecks[currentTurn]++;
-        } else {
-          consecutiveChecks[currentTurn] = 0;
-        }
-
-        // 3 consecutive checks = perpetual check, the checking side loses
-        if (consecutiveChecks[currentTurn] >= 3) {
-          return this.buildResult(
-            currentTurn === "red" ? "black" : "red",
-            `${currentTurn} lost by perpetual check`,
-            storedMoves,
-            redTime,
-            blackTime,
-          );
-        }
-
-        // Threefold repetition
+        // --- Unified repetition adjudicator ---
         const key = positionKey(gameState);
-        const count = (positionCounts.get(key) ?? 0) + 1;
-        positionCounts.set(key, count);
-        if (count >= 3) {
+        const opponentColor = gameState.turn; // side to move next
+        const gaveCheck = isInCheck(gameState, opponentColor);
+
+        const plyIndex = storedMoves.length; // 1-based ply (ply 0 = initial position)
+        plyHistory.push({ key, mover: currentTurn, gaveCheck });
+
+        if (!occurrencesByKey.has(key)) {
+          occurrencesByKey.set(key, []);
+        }
+        const occurrences = occurrencesByKey.get(key)!;
+        occurrences.push(plyIndex);
+
+        const verdict = adjudicateRepetition(occurrences, plyHistory);
+        if (verdict) {
           return this.buildResult(
-            "draw",
-            "Threefold repetition",
+            verdict.result,
+            verdict.reason,
             storedMoves,
             redTime,
             blackTime,

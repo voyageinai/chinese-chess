@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS games (
   red_engine_id TEXT NOT NULL REFERENCES engines(id),
   black_engine_id TEXT NOT NULL REFERENCES engines(id),
   result TEXT,
+  result_reason TEXT,
   moves TEXT NOT NULL DEFAULT '[]',
   red_time_left INTEGER,
   black_time_left INTEGER,

@@ -103,6 +103,10 @@ function runMigrations(database: Database.Database): void {
       "ALTER TABLE engines ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
     );
   }
+
+  if (!hasColumn(database, "games", "result_reason")) {
+    database.exec("ALTER TABLE games ADD COLUMN result_reason TEXT");
+  }
 }
 
 function seedDefaultEngines(database: Database.Database): void {

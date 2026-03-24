@@ -391,6 +391,11 @@ export default function GamePage({
               : game.result === "black"
                 ? "黑胜"
                 : "和棋"}
+            {game.result_reason && (
+              <span className="block text-sm font-sans text-ink-muted mt-1">
+                {game.result_reason}
+              </span>
+            )}
           </div>
         )}
 

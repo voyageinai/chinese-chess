@@ -264,14 +264,15 @@ export function updateGameMoves(
 export function updateGameResult(
   id: string,
   result: "red" | "black" | "draw",
+  reason: string,
   moves: string,
   redTimeLeft: number | null,
   blackTimeLeft: number | null,
 ): void {
   const db = getDb();
   db.prepare(
-    "UPDATE games SET result = ?, moves = ?, red_time_left = ?, black_time_left = ?, finished_at = unixepoch() WHERE id = ?",
-  ).run(result, moves, redTimeLeft, blackTimeLeft, id);
+    "UPDATE games SET result = ?, result_reason = ?, moves = ?, red_time_left = ?, black_time_left = ?, finished_at = unixepoch() WHERE id = ?",
+  ).run(result, reason, moves, redTimeLeft, blackTimeLeft, id);
 }
 
 export function updateGameStarted(id: string): void {

@@ -89,6 +89,7 @@ export interface Game {
   red_engine_id: string;
   black_engine_id: string;
   result: "red" | "black" | "draw" | null;
+  result_reason: string | null;
   moves: string; // JSON string of StoredMove[]
   red_time_left: number | null;
   black_time_left: number | null;
@@ -118,7 +119,7 @@ export type WsMessage =
       redTime: number;
       blackTime: number;
     }
-  | { type: "game_end"; gameId: string; result: "red" | "black" | "draw" }
+  | { type: "game_end"; gameId: string; result: "red" | "black" | "draw"; reason: string }
   | { type: "tournament_end"; tournamentId: string };
 
 // -- Audit log --
