@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Swords, Trophy, Cpu, Home, LogIn, User, BookOpen, Shield, Zap, Database } from "lucide-react";
+import { QuickMatchDialog } from "@/components/QuickMatchDialog";
 
 const navItems = [
   { href: "/", label: "首页", icon: Home },
-  { href: "/quick-match", label: "排位赛", icon: Zap },
   { href: "/tournaments", label: "锦标赛", icon: Trophy },
   { href: "/games", label: "对局库", icon: Database },
   { href: "/engines", label: "引擎", icon: Cpu },
@@ -21,8 +21,10 @@ interface CurrentUser {
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [checked, setChecked] = useState(false);
+  const [quickMatchOpen, setQuickMatchOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -41,7 +43,37 @@ export function Navbar() {
         </Link>
 
         <div className="flex items-center gap-6">
-          {navItems.map((item) => {
+          {navItems.slice(0, 1).map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-1.5 text-sm transition-colors ${
+                  active ? "text-ink font-semibold" : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              if (!user && checked) {
+                router.push("/login");
+                return;
+              }
+              setQuickMatchOpen(true);
+            }}
+            className="flex items-center gap-1.5 text-sm transition-colors text-ink-muted hover:text-ink"
+          >
+            <Zap className="w-4 h-4" />
+            排位赛
+          </button>
+          {navItems.slice(1).map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
             return (
@@ -97,6 +129,7 @@ export function Navbar() {
           )}
         </div>
       </div>
+      <QuickMatchDialog open={quickMatchOpen} onOpenChange={setQuickMatchOpen} />
     </nav>
   );
 }
