@@ -13,7 +13,7 @@ import {
   CardContent,
   CardAction,
 } from "@/components/ui/card";
-import { Cpu, Upload, Trash2 } from "lucide-react";
+import { Cpu, Upload, Trash2, Zap } from "lucide-react";
 
 interface Engine {
   id: string;
@@ -41,6 +41,10 @@ export default function EnginesPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
+
+  // Calibration
+  const [calibratingId, setCalibratingId] = useState<string | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -92,6 +96,7 @@ export default function EnginesPage() {
       }
 
       setEngines((prev) => [data.engine, ...prev]);
+      setCalibratingId(data.engine.id);
       setUploadName("");
       setUploadFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -126,6 +131,48 @@ export default function EnginesPage() {
     } finally {
       setDeletingId(null);
       setConfirmDeleteId(null);
+    }
+  }
+
+  async function handleCalibrate(engineId: string, engineName: string) {
+    setCalibrating(true);
+    try {
+      const lbRes = await fetch("/api/leaderboard");
+      const lbData = await lbRes.json();
+      const top = (lbData.leaderboard ?? [])
+        .filter((e: { id: string }) => e.id !== engineId)
+        .slice(0, 3);
+
+      if (top.length === 0) {
+        setUploadError("暂无其他引擎可供定级");
+        return;
+      }
+
+      const engineIds = [engineId, ...top.map((e: { id: string }) => e.id)];
+      const res = await fetch("/api/tournaments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `${engineName} 定级赛`,
+          timeBase: 60,
+          timeInc: 1,
+          rounds: 1,
+          format: "gauntlet",
+          engineIds,
+          autoStart: true,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCalibratingId(null);
+        router.push(`/tournaments/${data.tournament.id}`);
+      } else {
+        setUploadError(data.error || "定级赛创建失败");
+      }
+    } catch {
+      setUploadError("网络错误");
+    } finally {
+      setCalibrating(false);
     }
   }
 
@@ -259,6 +306,22 @@ export default function EnginesPage() {
                       )}
                     </span>
                   </div>
+                  {calibratingId === engine.id && (
+                    <div className="mt-3 pt-3 border-t border-paper-300">
+                      <Button
+                        size="sm"
+                        className="w-full"
+                        disabled={calibrating}
+                        onClick={() => handleCalibrate(engine.id, engine.name)}
+                      >
+                        <Zap className="w-3.5 h-3.5" data-icon="inline-start" />
+                        {calibrating ? "创建中..." : "立即定级"}
+                      </Button>
+                      <p className="text-xs text-ink-muted mt-1 text-center">
+                        1+1 快棋 vs 排行榜前 3
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}

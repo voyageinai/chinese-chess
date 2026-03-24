@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { getTournaments, createTournament } from "@/db/queries";
+import {
+  getTournaments,
+  createTournament,
+  addEngineToTournament,
+  getEngineById,
+  getTournamentById,
+} from "@/db/queries";
+import { TournamentRunner, registerRunner } from "@/server/tournament";
+import { wsHub } from "@/server/ws";
+import { logAudit } from "@/server/audit";
 
 export async function GET() {
   try {
@@ -25,7 +34,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const { name, timeBase, timeInc, rounds } = await request.json();
+    const { name, timeBase, timeInc, rounds, format, engineIds, autoStart } =
+      await request.json();
 
     if (!name || timeBase == null || timeInc == null) {
       return NextResponse.json(
@@ -65,15 +75,75 @@ export async function POST(request: Request) {
       );
     }
 
+    // Validate all engines BEFORE creating tournament (avoid half-baked state)
+    if (Array.isArray(engineIds) && engineIds.length > 0) {
+      for (const eid of engineIds) {
+        const engine = getEngineById(eid);
+        if (!engine) {
+          return NextResponse.json({ error: `引擎不存在` }, { status: 404 });
+        }
+        if (engine.status === "disabled") {
+          return NextResponse.json(
+            { error: `引擎 ${engine.name} 已被禁用` },
+            { status: 403 },
+          );
+        }
+        if (
+          engine.visibility !== "public" &&
+          engine.user_id !== user.id &&
+          user.role !== "admin"
+        ) {
+          return NextResponse.json(
+            { error: `引擎 ${engine.name} 不可用` },
+            { status: 403 },
+          );
+        }
+      }
+    }
+
+    const validFormats = ["round_robin", "knockout", "gauntlet", "swiss"];
+    const tournamentFormat = validFormats.includes(format) ? format : "round_robin";
+
     const tournament = createTournament(
       user.id,
       name.trim(),
       timeBase,
       timeInc,
       rounds ?? 1,
+      "tournament",
+      tournamentFormat,
     );
 
-    return NextResponse.json({ tournament }, { status: 201 });
+    // Add engines if provided
+    if (Array.isArray(engineIds) && engineIds.length > 0) {
+      for (const eid of engineIds) {
+        addEngineToTournament(tournament.id, eid);
+      }
+    }
+
+    // Auto-start if requested and enough engines
+    if (autoStart && Array.isArray(engineIds) && engineIds.length >= 2) {
+      const runner = new TournamentRunner(tournament.id);
+      if (registerRunner(tournament.id, runner)) {
+        runner.on("move", (msg) => wsHub.broadcast(msg));
+        runner.on("game_start", (msg) => wsHub.broadcast(msg));
+        runner.on("game_end", (msg) => wsHub.broadcast(msg));
+        runner.on("tournament_end", (msg) => wsHub.broadcast(msg));
+        runner.on("engine_thinking", (msg) => wsHub.broadcast(msg, true));
+        runner.run().catch((err) =>
+          console.error("Tournament auto-start error:", err),
+        );
+        logAudit("tournament.start", user.id, "tournament", tournament.id, {
+          engine_count: engineIds.length,
+          auto_start: true,
+        });
+      }
+    }
+
+    return NextResponse.json(
+      { tournament: getTournamentById(tournament.id) },
+      { status: 201 },
+    );
   } catch (error) {
     console.error("Create tournament error:", error);
     return NextResponse.json(

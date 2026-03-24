@@ -4,13 +4,22 @@ import {
   createTournament,
   addEngineToTournament,
   getEngineById,
+  getVisibleEngines,
+  createGame,
 } from "@/db/queries";
-import { TournamentRunner, registerRunner } from "@/server/tournament";
+import { TournamentRunner, registerRunner, loadOpeningFens } from "@/server/tournament";
 import { wsHub } from "@/server/ws";
 import { isAdmin } from "@/server/permissions";
 import { logAudit } from "@/server/audit";
+import { selectOpponents, randomColor } from "@/server/matchmaking";
 
-const MAX_QUICK_MATCH_ENGINES = 4;
+function wireRunner(runner: TournamentRunner): void {
+  runner.on("move", (msg) => wsHub.broadcast(msg));
+  runner.on("game_start", (msg) => wsHub.broadcast(msg));
+  runner.on("game_end", (msg) => wsHub.broadcast(msg));
+  runner.on("tournament_end", (msg) => wsHub.broadcast(msg));
+  runner.on("engine_thinking", (msg) => wsHub.broadcast(msg, true));
+}
 
 export async function POST(request: Request) {
   try {
@@ -19,104 +28,161 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "请先登录" }, { status: 401 });
     }
 
-    const { engineIds, timeBase, timeInc } = await request.json();
+    const body = await request.json();
 
-    if (!Array.isArray(engineIds) || engineIds.length < 2) {
-      return NextResponse.json(
-        { error: "至少选择 2 个引擎" },
-        { status: 400 },
-      );
+    // ── New format: matchmaking mode ──
+    if (typeof body.engineId === "string") {
+      return handleMatchmaking(body, user);
     }
 
-    if (engineIds.length > MAX_QUICK_MATCH_ENGINES) {
-      return NextResponse.json(
-        {
-          error: `快速对弈最多 ${MAX_QUICK_MATCH_ENGINES} 个引擎，更多引擎请创建正式锦标赛`,
-        },
-        { status: 400 },
-      );
+    // ── Legacy format: multi-engine quick match ──
+    if (Array.isArray(body.engineIds)) {
+      return handleLegacyQuickMatch(body, user);
     }
 
-    const resolvedTimeBase = typeof timeBase === "number" && timeBase > 0 ? timeBase : 60;
-    const resolvedTimeInc = typeof timeInc === "number" && timeInc >= 0 ? timeInc : 1;
-
-    // Validate all engines exist and are accessible
-    const engineNames: string[] = [];
-    for (const eid of engineIds) {
-      const engine = getEngineById(eid);
-      if (!engine) {
-        return NextResponse.json(
-          { error: `引擎不存在` },
-          { status: 404 },
-        );
-      }
-      if (engine.status === "disabled") {
-        return NextResponse.json(
-          { error: `引擎 ${engine.name} 已被禁用` },
-          { status: 403 },
-        );
-      }
-      if (
-        engine.visibility !== "public" &&
-        engine.user_id !== user.id &&
-        !isAdmin(user)
-      ) {
-        return NextResponse.json(
-          { error: `引擎 ${engine.name} 不可用` },
-          { status: 403 },
-        );
-      }
-      engineNames.push(engine.name);
-    }
-
-    // Generate name
-    const name =
-      engineIds.length === 2
-        ? `${engineNames[0]} vs ${engineNames[1]}`
-        : `快速对弈 (${engineNames.join(", ")})`;
-
-    // Create tournament (type=quick_match, rounds=1 → 2 games per pair with color swap)
-    const tournament = createTournament(
-      user.id,
-      name,
-      resolvedTimeBase,
-      resolvedTimeInc,
-      1,
-      "quick_match",
-    );
-
-    // Add engines
-    for (const eid of engineIds) {
-      addEngineToTournament(tournament.id, eid);
-    }
-
-    // Start immediately
-    const runner = new TournamentRunner(tournament.id);
-    if (!registerRunner(tournament.id, runner)) {
-      return NextResponse.json(
-        { error: "启动失败" },
-        { status: 409 },
-      );
-    }
-    runner.on("move", (msg) => wsHub.broadcast(msg));
-    runner.on("game_start", (msg) => wsHub.broadcast(msg));
-    runner.on("game_end", (msg) => wsHub.broadcast(msg));
-    runner.on("tournament_end", (msg) => wsHub.broadcast(msg));
-    runner.run().catch((err) => console.error("Quick match error:", err));
-
-    logAudit("quick_match.start", user.id, "tournament", tournament.id, {
-      engine_count: engineIds.length,
-    });
-
-    return NextResponse.json(
-      { tournament, message: "快速对弈已开始" },
-      { status: 201 },
-    );
+    return NextResponse.json({ error: "请提供 engineId 或 engineIds" }, { status: 400 });
   } catch (error) {
     console.error("Quick match error:", error);
-    return NextResponse.json(
-      { error: "服务器错误" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "服务器错误" }, { status: 500 });
   }
+}
+
+async function handleMatchmaking(
+  body: { engineId: string; gameCount?: number; timeBase?: number; timeInc?: number },
+  user: { id: string; role: string },
+) {
+  const { engineId, gameCount = 1 } = body;
+  const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : 60;
+  const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : 1;
+
+  // Validate engine belongs to user
+  const engine = getEngineById(engineId);
+  if (!engine) {
+    return NextResponse.json({ error: "引擎不存在" }, { status: 404 });
+  }
+  if (engine.user_id !== user.id) {
+    return NextResponse.json({ error: "只能使用自己的引擎" }, { status: 403 });
+  }
+  if (engine.status === "disabled") {
+    return NextResponse.json({ error: "引擎已被禁用" }, { status: 403 });
+  }
+
+  // Get all visible engines for matchmaking pool
+  const allEngines = getVisibleEngines();
+
+  // Select opponents (weighted random, no repeats, exclude same user)
+  const opponents = selectOpponents(engineId, engine.elo, user.id, gameCount, allEngines);
+  if (opponents.length === 0) {
+    return NextResponse.json({ error: "暂无可匹配的对手，请等待其他用户上传引擎" }, { status: 400 });
+  }
+
+  // Load opening book
+  const openingFens = loadOpeningFens();
+
+  // Generate tournament name
+  const oppNames = opponents.map((id) => getEngineById(id)!.name);
+  const name = opponents.length === 1
+    ? `${engine.name} vs ${oppNames[0]}`
+    : `${engine.name} 排位赛 (${opponents.length} 局)`;
+
+  // Create tournament
+  const tournament = createTournament(
+    user.id,
+    name,
+    resolvedTimeBase,
+    resolvedTimeInc,
+    1,
+    "quick_match",
+    "round_robin",
+  );
+
+  // Add all engines
+  addEngineToTournament(tournament.id, engineId);
+  for (const oppId of opponents) {
+    addEngineToTournament(tournament.id, oppId);
+  }
+
+  // Pre-create games with random colors
+  const gameIds: string[] = [];
+  let fenIndex = 0;
+  for (const oppId of opponents) {
+    const color = randomColor();
+    const [red, black] = color === "red" ? [engineId, oppId] : [oppId, engineId];
+    const fen = openingFens.length > 0 ? openingFens[fenIndex++ % openingFens.length] : undefined;
+    const game = createGame(tournament.id, red, black, fen);
+    gameIds.push(game.id);
+  }
+
+  // Start runner
+  const runner = new TournamentRunner(tournament.id);
+  if (!registerRunner(tournament.id, runner)) {
+    return NextResponse.json({ error: "启动失败" }, { status: 409 });
+  }
+  wireRunner(runner);
+  runner.run().catch((err) => console.error("Quick match error:", err));
+
+  logAudit("quick_match.start", user.id, "tournament", tournament.id, {
+    mode: "matchmaking",
+    game_count: opponents.length,
+  });
+
+  return NextResponse.json(
+    {
+      tournament,
+      gameId: gameIds.length === 1 ? gameIds[0] : undefined,
+      message: opponents.length === 1 ? "对弈已开始" : "排位赛已开始",
+    },
+    { status: 201 },
+  );
+}
+
+async function handleLegacyQuickMatch(
+  body: { engineIds: string[]; timeBase?: number; timeInc?: number },
+  user: { id: string; role: string },
+) {
+  const { engineIds } = body;
+  const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : 60;
+  const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : 1;
+
+  if (engineIds.length < 2) {
+    return NextResponse.json({ error: "至少选择 2 个引擎" }, { status: 400 });
+  }
+  if (engineIds.length > 4) {
+    return NextResponse.json({ error: "快速对弈最多 4 个引擎" }, { status: 400 });
+  }
+
+  const engineNames: string[] = [];
+  for (const eid of engineIds) {
+    const engine = getEngineById(eid);
+    if (!engine) return NextResponse.json({ error: "引擎不存在" }, { status: 404 });
+    if (engine.status === "disabled") return NextResponse.json({ error: `引擎 ${engine.name} 已被禁用` }, { status: 403 });
+    if (engine.visibility !== "public" && engine.user_id !== user.id && user.role !== "admin") {
+      return NextResponse.json({ error: `引擎 ${engine.name} 不可用` }, { status: 403 });
+    }
+    engineNames.push(engine.name);
+  }
+
+  const name = engineIds.length === 2
+    ? `${engineNames[0]} vs ${engineNames[1]}`
+    : `快速对弈 (${engineNames.join(", ")})`;
+
+  const tournament = createTournament(user.id, name, resolvedTimeBase, resolvedTimeInc, 1, "quick_match");
+
+  for (const eid of engineIds) {
+    addEngineToTournament(tournament.id, eid);
+  }
+
+  const runner = new TournamentRunner(tournament.id);
+  if (!registerRunner(tournament.id, runner)) {
+    return NextResponse.json({ error: "启动失败" }, { status: 409 });
+  }
+  wireRunner(runner);
+  runner.run().catch((err) => console.error("Quick match error:", err));
+
+  logAudit("quick_match.start", user.id, "tournament", tournament.id, {
+    mode: "legacy",
+    engine_count: engineIds.length,
+  });
+
+  return NextResponse.json({ tournament, message: "快速对弈已开始" }, { status: 201 });
 }
