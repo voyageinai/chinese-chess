@@ -14,6 +14,34 @@ import {
 import { INITIAL_FEN, uciToSquare, rowOf, colOf } from "@/lib/constants";
 import type { StoredMove, Game, Engine } from "@/lib/types";
 
+const REASON_ZH: Record<string, string> = {
+  "Checkmate": "将杀",
+  "Stalemate": "困毙",
+  "Red lost on time": "红方超时",
+  "Black lost on time": "黑方超时",
+  "Red lost by perpetual check": "红方长将判负",
+  "Black lost by perpetual check": "黑方长将判负",
+  "Mutual perpetual check": "双方长将，判和",
+  "Threefold repetition": "三次重复局面",
+  "120-move rule": "120步无吃子，判和",
+  "Game aborted": "对局中止",
+  "Internal error": "系统异常",
+  "red engine crashed": "红方引擎崩溃",
+  "black engine crashed": "黑方引擎崩溃",
+  "red engine failed to respond": "红方引擎无响应",
+  "black engine failed to respond": "黑方引擎无响应",
+  "Red engine failed to initialize": "红方引擎启动失败",
+  "Black engine failed to initialize": "黑方引擎启动失败",
+};
+
+function translateReason(reason: string): string {
+  if (REASON_ZH[reason]) return REASON_ZH[reason];
+  // Handle dynamic reasons like "red engine made illegal move: h2e2"
+  if (reason.includes("illegal move")) return reason.replace(/^(\w+) engine made illegal move:/, "$1方引擎走出非法着法:");
+  if (reason.includes("invalid move")) return reason.replace(/^(\w+) engine returned invalid move:/, "$1方引擎返回无效着法:");
+  return reason;
+}
+
 function uciToLastMove(
   uci: string,
 ): { from: [number, number]; to: [number, number] } {
@@ -393,7 +421,7 @@ export default function GamePage({
                 : "和棋"}
             {game.result_reason && (
               <span className="block text-sm font-sans text-ink-muted mt-1">
-                {game.result_reason}
+                {translateReason(game.result_reason)}
               </span>
             )}
           </div>
