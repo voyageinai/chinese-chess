@@ -160,6 +160,7 @@ export default function TournamentsPage() {
             gameCount: parseInt(formGameCount, 10) || 3,
             timeBase: parseInt(formTimeBase, 10),
             timeInc: parseInt(formTimeInc, 10),
+            label: formFormat === "gauntlet" ? "定级赛" : "排位赛",
           }),
         });
       } else {

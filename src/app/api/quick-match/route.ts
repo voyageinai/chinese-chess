@@ -48,10 +48,10 @@ export async function POST(request: Request) {
 }
 
 async function handleMatchmaking(
-  body: { engineId: string; gameCount?: number; timeBase?: number; timeInc?: number },
+  body: { engineId: string; gameCount?: number; timeBase?: number; timeInc?: number; label?: string },
   user: { id: string; role: string },
 ) {
-  const { engineId, gameCount = 1 } = body;
+  const { engineId, gameCount = 1, label } = body;
   const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : 60;
   const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : 1;
 
@@ -81,9 +81,10 @@ async function handleMatchmaking(
 
   // Generate tournament name
   const oppNames = opponents.map((id) => getEngineById(id)!.name);
+  const tag = label || "排位赛";
   const name = opponents.length === 1
     ? `${engine.name} vs ${oppNames[0]}`
-    : `${engine.name} 排位赛 (${opponents.length} 局)`;
+    : `${engine.name} ${tag} (${opponents.length} 局)`;
 
   // Create tournament
   const tournament = createTournament(
