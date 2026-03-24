@@ -132,12 +132,12 @@ export function Leaderboard({ engines }: LeaderboardProps) {
                   {engine.draws}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
-                  {engine.games_played > 0
-                    ? `${((engine.wins / engine.games_played) * 100).toFixed(1)}%`
+                  {engine.wins + engine.losses + engine.draws > 0
+                    ? `${((engine.wins / (engine.wins + engine.losses + engine.draws)) * 100).toFixed(1)}%`
                     : "-"}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm text-ink-muted">
-                  {engine.games_played}
+                  {engine.wins + engine.losses + engine.draws}
                 </TableCell>
               </TableRow>
             );

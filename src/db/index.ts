@@ -140,6 +140,13 @@ function runMigrations(database: Database.Database): void {
     `);
   }
 
+  // -- v4b: Reconcile games_played with actual game count --
+  // games_played may be stale due to server restarts during tournaments;
+  // W/L/D (backfilled from games table) is the source of truth.
+  database.exec(
+    "UPDATE engines SET games_played = wins + losses + draws WHERE games_played != wins + losses + draws",
+  );
+
   // -- v5: Add type column to tournaments --
   if (!hasColumn(database, "tournaments", "type")) {
     database.exec(
