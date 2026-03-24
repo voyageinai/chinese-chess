@@ -269,7 +269,7 @@ export default function TournamentsPage() {
                       ["round_robin", "循环赛", "每对引擎互相对弈"],
                       ["knockout", "淘汰赛", "输者淘汰，决出冠军"],
                       ["gauntlet", "定级赛", "挑战者 vs 多个对手"],
-                      ["swiss", "排位赛", "自动匹配对手"],
+                      ["swiss", "排位赛", "自动匹配（推荐用导航栏排位赛）"],
                     ] as const).map(([val, label, desc]) => (
                       <button
                         key={val}

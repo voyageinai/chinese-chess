@@ -7,7 +7,7 @@ import { Swords, Trophy, Cpu, Home, LogIn, User, BookOpen, Shield, Zap, Database
 
 const navItems = [
   { href: "/", label: "首页", icon: Home },
-  { href: "/quick-match", label: "快速对弈", icon: Zap },
+  { href: "/quick-match", label: "排位赛", icon: Zap },
   { href: "/tournaments", label: "锦标赛", icon: Trophy },
   { href: "/games", label: "对局库", icon: Database },
   { href: "/engines", label: "引擎", icon: Cpu },

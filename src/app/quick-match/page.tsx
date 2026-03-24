@@ -17,6 +17,7 @@ export default function QuickMatchPage() {
   const router = useRouter();
   const [engines, setEngines] = useState<Engine[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [gameCount, setGameCount] = useState("1");
   const [timeBase, setTimeBase] = useState("60");
   const [timeInc, setTimeInc] = useState("1");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -63,6 +64,7 @@ export default function QuickMatchPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           engineId: selectedId,
+          gameCount: parseInt(gameCount, 10) || 1,
           timeBase: parseInt(timeBase, 10),
           timeInc: parseInt(timeInc, 10),
         }),
@@ -125,7 +127,7 @@ export default function QuickMatchPage() {
       <div className="text-center py-4">
         <h1 className="font-brush text-4xl text-ink flex items-center justify-center gap-3">
           <Zap className="w-8 h-8" />
-          快速对弈
+          排位赛
         </h1>
         <p className="mt-2 text-ink-light">
           选择你的引擎，系统自动匹配对手
@@ -159,6 +161,23 @@ export default function QuickMatchPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Game count */}
+      <div className="space-y-1.5">
+        <Label htmlFor="gameCount">对局数</Label>
+        <Input
+          id="gameCount"
+          type="number"
+          min="1"
+          max="20"
+          value={gameCount}
+          onChange={(e) => setGameCount(e.target.value)}
+          className="w-24"
+        />
+        <p className="text-xs text-ink-muted">
+          每局随机匹配不重复对手，随机分配红黑方
+        </p>
       </div>
 
       {/* Advanced settings */}
@@ -214,10 +233,10 @@ export default function QuickMatchPage() {
           size="lg"
         >
           <Zap className="w-4 h-4" data-icon="inline-start" />
-          {starting ? "匹配中..." : "开始对弈"}
+          {starting ? "匹配中..." : parseInt(gameCount) > 1 ? `开始排位 (${gameCount} 局)` : "开始对弈"}
         </Button>
         <p className="text-xs text-ink-muted text-center mt-2">
-          系统将自动匹配 Elo 相近的对手
+          自动匹配 Elo 相近的对手
         </p>
       </div>
     </div>
