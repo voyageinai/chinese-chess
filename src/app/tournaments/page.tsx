@@ -460,7 +460,9 @@ export default function TournamentsPage() {
                     </Badge>
                   </CardTitle>
                   <CardDescription>
-                    {FORMAT_LABELS[t.format] || "循环赛"} &middot;{" "}
+                    {t.type !== "quick_match" && (
+                      <>{FORMAT_LABELS[t.format] || "循环赛"} &middot; </>
+                    )}
                     {formatTimeControl(t.time_control_base, t.time_control_inc)}{" "}
                     &middot; {t.rounds} 轮
                   </CardDescription>

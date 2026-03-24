@@ -346,7 +346,9 @@ export default function TournamentDetailPage() {
             tournament.time_control_base,
             tournament.time_control_inc,
           )}{" "}
-          &middot; {FORMAT_LABELS[tournament.format] || "循环赛"}{" "}
+          {tournament.type !== "quick_match" && (
+            <>&middot; {FORMAT_LABELS[tournament.format] || "循环赛"} </>
+          )}
           &middot; {tournament.rounds} 轮 &middot; 创建于{" "}
           {new Date(tournament.created_at * 1000).toLocaleDateString("zh-CN")}
         </p>
