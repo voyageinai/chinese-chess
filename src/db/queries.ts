@@ -125,11 +125,25 @@ export function updateEngineElo(
   id: string,
   newElo: number,
   gamesPlayed: number,
+  resultDelta?: { wins: number; losses: number; draws: number },
 ): void {
   const db = getDb();
-  db.prepare(
-    "UPDATE engines SET elo = ?, games_played = ? WHERE id = ?",
-  ).run(newElo, gamesPlayed, id);
+  if (resultDelta) {
+    db.prepare(
+      "UPDATE engines SET elo = ?, games_played = ?, wins = wins + ?, losses = losses + ?, draws = draws + ? WHERE id = ?",
+    ).run(
+      newElo,
+      gamesPlayed,
+      resultDelta.wins,
+      resultDelta.losses,
+      resultDelta.draws,
+      id,
+    );
+  } else {
+    db.prepare(
+      "UPDATE engines SET elo = ?, games_played = ? WHERE id = ?",
+    ).run(newElo, gamesPlayed, id);
+  }
 }
 
 export function getLeaderboard(): (Engine & { owner: string })[] {
@@ -149,13 +163,14 @@ export function createTournament(
   timeControlBase: number,
   timeControlInc: number,
   rounds: number = 1,
+  type: "tournament" | "quick_match" = "tournament",
 ): Tournament {
   const db = getDb();
   const id = nanoid();
 
   db.prepare(
-    "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds) VALUES (?, ?, ?, ?, ?, ?)",
-  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds);
+    "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds, type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds, type);
 
   return getTournamentById(id)!;
 }

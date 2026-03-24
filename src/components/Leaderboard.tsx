@@ -14,6 +14,9 @@ interface LeaderboardEngine {
   name: string;
   elo: number;
   games_played: number;
+  wins: number;
+  losses: number;
+  draws: number;
   owner?: string;
 }
 
@@ -69,6 +72,10 @@ export function Leaderboard({ engines }: LeaderboardProps) {
               <TableHead className="text-ink-muted">作者</TableHead>
             )}
             <TableHead className="text-right text-ink-muted">等级分</TableHead>
+            <TableHead className="text-right text-ink-muted">胜</TableHead>
+            <TableHead className="text-right text-ink-muted">负</TableHead>
+            <TableHead className="text-right text-ink-muted">和</TableHead>
+            <TableHead className="text-right text-ink-muted">胜率</TableHead>
             <TableHead className="text-right text-ink-muted">对局</TableHead>
           </TableRow>
         </TableHeader>
@@ -113,7 +120,21 @@ export function Leaderboard({ engines }: LeaderboardProps) {
                   </TableCell>
                 )}
                 <TableCell className="text-right font-mono text-sm">
-                  {engine.elo}
+                  {Math.round(engine.elo)}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm text-green-700">
+                  {engine.wins}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm text-vermilion">
+                  {engine.losses}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm text-ink-muted">
+                  {engine.draws}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm">
+                  {engine.games_played > 0
+                    ? `${((engine.wins / engine.games_played) * 100).toFixed(1)}%`
+                    : "-"}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm text-ink-muted">
                   {engine.games_played}

@@ -18,6 +18,9 @@ interface LeaderboardEngine {
   name: string;
   elo: number;
   games_played: number;
+  wins: number;
+  losses: number;
+  draws: number;
   owner: string;
 }
 
@@ -25,6 +28,7 @@ interface Tournament {
   id: string;
   name: string;
   status: "pending" | "running" | "finished";
+  type: "tournament" | "quick_match";
   time_control_base: number;
   time_control_inc: number;
   rounds: number;

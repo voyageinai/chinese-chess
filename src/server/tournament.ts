@@ -17,7 +17,8 @@ export interface Pairing {
 
 /**
  * Generate round-robin pairings for a set of engines.
- * Each pair plays `rounds` games, alternating colors on even/odd rounds.
+ * Each pair plays 2 games per round (swapping colors), ensuring perfect color
+ * balance.  The final list is shuffled to eliminate systematic ordering bias.
  */
 export function generateRoundRobinPairings(
   engineIds: string[],
@@ -27,13 +28,15 @@ export function generateRoundRobinPairings(
   for (let i = 0; i < engineIds.length; i++) {
     for (let j = i + 1; j < engineIds.length; j++) {
       for (let r = 0; r < rounds; r++) {
-        if (r % 2 === 0) {
-          pairings.push({ red: engineIds[i], black: engineIds[j] });
-        } else {
-          pairings.push({ red: engineIds[j], black: engineIds[i] });
-        }
+        pairings.push({ red: engineIds[i], black: engineIds[j] });
+        pairings.push({ red: engineIds[j], black: engineIds[i] });
       }
     }
+  }
+  // Fisher-Yates shuffle to eliminate systematic bias
+  for (let i = pairings.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pairings[i], pairings[j]] = [pairings[j], pairings[i]];
   }
   return pairings;
 }
@@ -214,21 +217,33 @@ export class TournamentRunner extends EventEmitter {
         scoreA,
       );
 
-      // Update engine Elo in DB and local cache
+      // Update engine Elo and W/L/D in DB and local cache
       redEngineData.elo = Math.round(newRedElo);
       redEngineData.games_played++;
+      const redDelta = {
+        wins: result.result === "red" ? 1 : 0,
+        losses: result.result === "black" ? 1 : 0,
+        draws: result.result === "draw" ? 1 : 0,
+      };
       queries.updateEngineElo(
         game.red_engine_id,
         redEngineData.elo,
         redEngineData.games_played,
+        redDelta,
       );
 
       blackEngineData.elo = Math.round(newBlackElo);
       blackEngineData.games_played++;
+      const blackDelta = {
+        wins: result.result === "black" ? 1 : 0,
+        losses: result.result === "red" ? 1 : 0,
+        draws: result.result === "draw" ? 1 : 0,
+      };
       queries.updateEngineElo(
         game.black_engine_id,
         blackEngineData.elo,
         blackEngineData.games_played,
+        blackDelta,
       );
 
       // Update tournament scores

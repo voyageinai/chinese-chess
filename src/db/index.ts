@@ -107,6 +107,45 @@ function runMigrations(database: Database.Database): void {
   if (!hasColumn(database, "games", "result_reason")) {
     database.exec("ALTER TABLE games ADD COLUMN result_reason TEXT");
   }
+
+  // -- v4: Add win/loss/draw counters to engines --
+  if (!hasColumn(database, "engines", "wins")) {
+    database.exec(
+      "ALTER TABLE engines ADD COLUMN wins INTEGER NOT NULL DEFAULT 0",
+    );
+    database.exec(
+      "ALTER TABLE engines ADD COLUMN losses INTEGER NOT NULL DEFAULT 0",
+    );
+    database.exec(
+      "ALTER TABLE engines ADD COLUMN draws INTEGER NOT NULL DEFAULT 0",
+    );
+    // Backfill from games table
+    database.exec(`
+      UPDATE engines SET
+        wins = COALESCE((
+          SELECT COUNT(*) FROM games
+          WHERE (red_engine_id = engines.id AND result = 'red')
+             OR (black_engine_id = engines.id AND result = 'black')
+        ), 0),
+        losses = COALESCE((
+          SELECT COUNT(*) FROM games
+          WHERE (red_engine_id = engines.id AND result = 'black')
+             OR (black_engine_id = engines.id AND result = 'red')
+        ), 0),
+        draws = COALESCE((
+          SELECT COUNT(*) FROM games
+          WHERE (red_engine_id = engines.id OR black_engine_id = engines.id)
+            AND result = 'draw'
+        ), 0)
+    `);
+  }
+
+  // -- v5: Add type column to tournaments --
+  if (!hasColumn(database, "tournaments", "type")) {
+    database.exec(
+      "ALTER TABLE tournaments ADD COLUMN type TEXT NOT NULL DEFAULT 'tournament'",
+    );
+  }
 }
 
 function seedDefaultEngines(database: Database.Database): void {

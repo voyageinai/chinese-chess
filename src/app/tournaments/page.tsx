@@ -27,6 +27,7 @@ interface Tournament {
   id: string;
   name: string;
   status: "pending" | "running" | "finished";
+  type: "tournament" | "quick_match";
   time_control_base: number;
   time_control_inc: number;
   rounds: number;
@@ -224,7 +225,14 @@ export default function TournamentsPage() {
               <Card className="hover:ring-2 hover:ring-paper-400 transition-all cursor-pointer h-full">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between gap-2">
-                    <span className="truncate">{t.name}</span>
+                    <span className="truncate flex items-center gap-2">
+                      {t.type === "quick_match" && (
+                        <Badge variant="outline" className="text-xs shrink-0">
+                          快速对弈
+                        </Badge>
+                      )}
+                      {t.name}
+                    </span>
                     <Badge
                       variant={
                         t.status === "running"

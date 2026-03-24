@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { CrossTable } from "@/components/CrossTable";
 import { Badge } from "@/components/ui/badge";
@@ -27,13 +27,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Play, Plus } from "lucide-react";
+import { Play, Plus, RotateCcw } from "lucide-react";
 
 interface Tournament {
   id: string;
   owner_id: string;
   name: string;
   status: "pending" | "running" | "finished";
+  type: "tournament" | "quick_match";
   time_control_base: number;
   time_control_inc: number;
   rounds: number;
@@ -91,6 +92,7 @@ function formatTimeControl(base: number, inc: number): string {
 
 export default function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
 
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [entries, setEntries] = useState<TournamentEntry[]>([]);
@@ -109,6 +111,9 @@ export default function TournamentDetailPage() {
   // Start tournament state
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
+
+  // Rematch state (quick_match only)
+  const [rematching, setRematching] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -239,6 +244,31 @@ export default function TournamentDetailPage() {
       setStartError("网络错误");
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function handleRematch() {
+    if (!tournament) return;
+    setRematching(true);
+    try {
+      const engineIds = entries.map((e) => e.engine_id);
+      const res = await fetch("/api/quick-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          engineIds,
+          timeBase: tournament.time_control_base,
+          timeInc: tournament.time_control_inc,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        router.push(`/tournaments/${data.tournament.id}`);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setRematching(false);
     }
   }
 
@@ -495,6 +525,23 @@ export default function TournamentDetailPage() {
           </div>
         </section>
       )}
+
+      {/* Rematch button for finished quick matches */}
+      {tournament.type === "quick_match" &&
+        tournament.status === "finished" &&
+        user && (
+          <div className="text-center py-4">
+            <Button
+              onClick={handleRematch}
+              disabled={rematching}
+              variant="outline"
+              size="lg"
+            >
+              <RotateCcw className="w-4 h-4" data-icon="inline-start" />
+              {rematching ? "创建中..." : "再来一局"}
+            </Button>
+          </div>
+        )}
     </div>
   );
 }
