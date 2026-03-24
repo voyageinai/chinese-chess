@@ -35,12 +35,20 @@ interface Tournament {
   name: string;
   status: "pending" | "running" | "finished";
   type: "tournament" | "quick_match";
+  format: "round_robin" | "knockout" | "gauntlet" | "swiss";
   time_control_base: number;
   time_control_inc: number;
   rounds: number;
   created_at: number;
   finished_at: number | null;
 }
+
+const FORMAT_LABELS: Record<string, string> = {
+  round_robin: "循环赛",
+  knockout: "淘汰赛",
+  gauntlet: "定级赛",
+  swiss: "排位赛",
+};
 
 interface TournamentEntry {
   tournament_id: string;
@@ -338,6 +346,7 @@ export default function TournamentDetailPage() {
             tournament.time_control_base,
             tournament.time_control_inc,
           )}{" "}
+          &middot; {FORMAT_LABELS[tournament.format] || "循环赛"}{" "}
           &middot; {tournament.rounds} 轮 &middot; 创建于{" "}
           {new Date(tournament.created_at * 1000).toLocaleDateString("zh-CN")}
         </p>

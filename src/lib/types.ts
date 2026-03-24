@@ -36,6 +36,7 @@ export interface StoredMove {
   fen: string;
   time_ms: number;
   eval: number | null; // centipawns from red perspective, null if unavailable
+  depth?: number | null; // search depth at time of move
 }
 
 // -- API / DB types --
@@ -73,6 +74,7 @@ export interface Tournament {
   name: string;
   status: "pending" | "running" | "finished" | "cancelled";
   type: "tournament" | "quick_match";
+  format: "round_robin" | "knockout" | "gauntlet" | "swiss";
   time_control_base: number;
   time_control_inc: number;
   rounds: number;
@@ -99,6 +101,8 @@ export interface Game {
   black_time_left: number | null;
   started_at: number | null;
   finished_at: number | null;
+  opening_fen: string | null;
+  round: number | null;
 }
 
 // -- WebSocket messages --
@@ -109,6 +113,9 @@ export type WsMessage =
       move: UciMove;
       fen: string;
       eval: number | null;
+      depth: number | null;
+      nodes: number | null;
+      pv: string | null;
       redTime: number;
       blackTime: number;
       timeMs: number;
@@ -122,9 +129,19 @@ export type WsMessage =
       blackEngine: string;
       redTime: number;
       blackTime: number;
+      startFen?: string;
     }
   | { type: "game_end"; gameId: string; result: "red" | "black" | "draw"; reason: string }
-  | { type: "tournament_end"; tournamentId: string };
+  | { type: "tournament_end"; tournamentId: string }
+  | {
+      type: "engine_thinking";
+      gameId: string;
+      side: "red" | "black";
+      depth: number | null;
+      eval: number | null;
+      nodes: number | null;
+      pv: string | null;
+    };
 
 // -- Audit log --
 export interface AuditLog {

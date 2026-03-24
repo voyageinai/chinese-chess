@@ -1,0 +1,81 @@
+# Xiangqi Opening Book
+# Each line is a FEN position (after 2-4 opening moves).
+# Uses internal piece notation: H=horse, E=elephant.
+# Lines starting with # are comments.
+
+# === 中炮局 (Central Cannon openings) ===
+
+# 中炮对屏风马 (Central cannon vs screen horses)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RHEAKAEHR w - - 0 1
+
+# 中炮对屏风马 进三兵 (Central cannon vs screen horses, P3 advance)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/4P4/P1P3P1P/1C2C4/9/RHEAKAEHR b - - 0 1
+
+# 中炮对单提马 (Central cannon vs single horse defense)
+r1eakaehr/9/1ch4c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RHEAKAEHR w - - 0 1
+
+# 中炮对反宫马 (Central cannon vs reversed palace horse)
+rheakae1r/9/1c4hc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RHEAKAEHR w - - 0 1
+
+# 中炮对左三步虎 (Central cannon vs left 3-step tiger)
+rheakaehr/9/1c4hc1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C4/9/RHEAKAEHR w - - 0 1
+
+# === 飞相局 (Flying elephant opening) ===
+
+# 飞相局 (Elephant opening)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/4E4/RHEAKA1HR w - - 0 1
+
+# 飞相对进卒 (Elephant opening vs pawn advance)
+rheakaehr/9/1c5c1/p1p3p1p/4p4/9/P1P1P1P1P/1C5C1/4E4/RHEAKA1HR w - - 0 1
+
+# === 仙人指路 (Immortal's guide / Pawn opening) ===
+
+# 仙人指路 (P7 advance)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/2P6/P3P1P1P/1C5C1/9/RHEAKAEHR b - - 0 1
+
+# 仙人指路对卒底炮 (Pawn opening vs cannon to pawn rank)
+rheakaehr/9/7c1/p1p1p1p1p/9/2P6/P3P1P1P/7C1/9/RHEAKAEHR w - - 0 1
+
+# 仙人指路对进卒 (Pawn opening vs opposing pawn advance)
+rheakaehr/9/1c5c1/p1p3p1p/4p4/2P6/P3P1P1P/1C5C1/9/RHEAKAEHR w - - 0 1
+
+# === 起马局 (Horse opening) ===
+
+# 起马局 (Horse to c3)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RHEAKAHHR w - - 0 1
+
+# 起马局对进卒 (Horse opening vs pawn advance)
+rheakaehr/9/1c5c1/p1p1p3p/6p2/9/P1P1P1P1P/1C5C1/9/RHEAKAHHR w - - 0 1
+
+# === 过宫炮 (Cross-palace cannon) ===
+
+# 过宫炮 (Cannon to palace)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/2C4C1/9/RHEAKAEHR b - - 0 1
+
+# 过宫炮对进马 (Cross-palace cannon vs horse advance)
+r1eakaehr/9/1ch4c1/p1p1p1p1p/9/9/P1P1P1P1P/2C4C1/9/RHEAKAEHR w - - 0 1
+
+# === 士角炮 (Advisor-corner cannon) ===
+
+# 士角炮 (Cannon to advisor corner)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/3C5/RHEAKAEHR b - - 0 1
+
+# === 中炮进三兵 (Central cannon with P3 advance) ===
+
+# 中炮进三兵对屏风马 (Central cannon P3 vs screen horses)
+r1eakaehr/9/1ch2c1h1/p1p1p1p1p/9/4P4/P1P3P1P/1C2C4/9/RHEAKAEHR w - - 0 1
+
+# === 中炮七路马 (Central cannon with 7th-file horse) ===
+
+# 中炮七路马 (Central cannon, horse on 7th file)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C2C2H1/9/RHEAKA1HR b - - 0 1
+
+# === 对兵局 (Symmetric pawn opening) ===
+
+# 对兵局 (Both sides advance center pawn)
+rheakaehr/9/1c5c1/p1p3p1p/4p4/4P4/P1P3P1P/1C5C1/9/RHEAKAEHR w - - 0 1
+
+# === 顺手炮 (Same-direction cannons) ===
+
+# 顺手炮 (Both cannons to center, same direction)
+rheakaehr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/4C4/9/RHEAKAEHR b - - 0 1

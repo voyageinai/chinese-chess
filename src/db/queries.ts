@@ -88,7 +88,7 @@ export function getVisibleEngines(): Engine[] {
   const db = getDb();
   return db
     .prepare(
-      "SELECT * FROM engines WHERE visibility = 'public' ORDER BY user_id = '__system__' DESC, uploaded_at DESC",
+      "SELECT * FROM engines WHERE visibility = 'public' AND status = 'active' ORDER BY user_id = '__system__' DESC, uploaded_at DESC",
     )
     .all() as Engine[];
 }
@@ -155,6 +155,54 @@ export function getLeaderboard(): (Engine & { owner: string })[] {
     .all() as (Engine & { owner: string })[];
 }
 
+// ── Elo History ────────────────────────────────────────────────────────
+
+export function recordEloSnapshot(engineId: string, elo: number, gameId: string): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO elo_history (id, engine_id, elo, game_id) VALUES (?, ?, ?, ?)",
+  ).run(nanoid(), engineId, elo, gameId);
+}
+
+export function getEloHistory(engineId: string, limit = 50): { elo: number; recorded_at: number }[] {
+  const db = getDb();
+  return db.prepare(
+    "SELECT elo, recorded_at FROM elo_history WHERE engine_id = ? ORDER BY recorded_at DESC LIMIT ?",
+  ).all(engineId, limit) as { elo: number; recorded_at: number }[];
+}
+
+export function getEloDelta(engineId: string): number | null {
+  const db = getDb();
+  const rows = db.prepare(
+    "SELECT elo FROM elo_history WHERE engine_id = ? ORDER BY recorded_at DESC LIMIT 2",
+  ).all(engineId) as { elo: number }[];
+  if (rows.length < 2) return null;
+  return Math.round(rows[0].elo - rows[1].elo);
+}
+
+export function getLeaderboardWithDelta(): (Engine & { owner: string; elo_delta: number | null })[] {
+  const db = getDb();
+  // For each engine, compute delta as (latest elo_history entry) - (second latest entry).
+  // Using a correlated subquery per engine is correct and readable for typical engine counts.
+  const engines = db.prepare(
+    `SELECT e.*, u.username as owner,
+      (SELECT ROUND(h1.elo - h2.elo)
+       FROM elo_history h1
+       JOIN elo_history h2 ON h2.engine_id = h1.engine_id
+         AND h2.recorded_at = (
+           SELECT MAX(recorded_at) FROM elo_history
+           WHERE engine_id = h1.engine_id AND recorded_at < h1.recorded_at
+         )
+       WHERE h1.engine_id = e.id
+         AND h1.recorded_at = (SELECT MAX(recorded_at) FROM elo_history WHERE engine_id = e.id)
+       LIMIT 1) as elo_delta
+     FROM engines e
+     JOIN users u ON e.user_id = u.id
+     ORDER BY e.elo DESC`,
+  ).all() as (Engine & { owner: string; elo_delta: number | null })[];
+  return engines;
+}
+
 // ── Tournaments ────────────────────────────────────────────────────────
 
 export function createTournament(
@@ -164,13 +212,14 @@ export function createTournament(
   timeControlInc: number,
   rounds: number = 1,
   type: "tournament" | "quick_match" = "tournament",
+  format: "round_robin" | "knockout" | "gauntlet" | "swiss" = "round_robin",
 ): Tournament {
   const db = getDb();
   const id = nanoid();
 
   db.prepare(
-    "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds, type) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds, type);
+    "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds, type, format) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds, type, format);
 
   return getTournamentById(id)!;
 }
@@ -218,6 +267,16 @@ export function addEngineToTournament(
   ).run(tournamentId, engineId);
 }
 
+export function getFirstTournamentEngine(tournamentId: string): string | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT engine_id FROM tournament_entries WHERE tournament_id = ? ORDER BY ROWID ASC LIMIT 1",
+    )
+    .get(tournamentId) as { engine_id: string } | undefined;
+  return row?.engine_id ?? null;
+}
+
 export function getTournamentEntries(
   tournamentId: string,
 ): TournamentEntry[] {
@@ -253,13 +312,14 @@ export function createGame(
   tournamentId: string,
   redEngineId: string,
   blackEngineId: string,
+  openingFen?: string,
 ): Game {
   const db = getDb();
   const id = nanoid();
 
   db.prepare(
-    "INSERT INTO games (id, tournament_id, red_engine_id, black_engine_id) VALUES (?, ?, ?, ?)",
-  ).run(id, tournamentId, redEngineId, blackEngineId);
+    "INSERT INTO games (id, tournament_id, red_engine_id, black_engine_id, opening_fen) VALUES (?, ?, ?, ?, ?)",
+  ).run(id, tournamentId, redEngineId, blackEngineId, openingFen ?? null);
 
   return getGameById(id)!;
 }
@@ -475,6 +535,48 @@ export function deleteInviteCode(code: string): boolean {
     .prepare("DELETE FROM invite_codes WHERE code = ? AND used_by IS NULL")
     .run(code);
   return result.changes > 0;
+}
+
+// ── Game Search ──────────────────────────────────────────────────────
+
+export function searchGames(opts: {
+  engineId?: string;
+  result?: "red" | "black" | "draw";
+  limit?: number;
+  offset?: number;
+}): { games: (Game & { red_engine_name: string; black_engine_name: string })[], total: number } {
+  const db = getDb();
+  const conditions: string[] = ["g.result IS NOT NULL"]; // only finished games
+  const params: unknown[] = [];
+
+  if (opts.engineId) {
+    conditions.push("(g.red_engine_id = ? OR g.black_engine_id = ?)");
+    params.push(opts.engineId, opts.engineId);
+  }
+  if (opts.result) {
+    conditions.push("g.result = ?");
+    params.push(opts.result);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const limit = opts.limit ?? 20;
+  const offset = opts.offset ?? 0;
+
+  const countRow = db.prepare(
+    `SELECT COUNT(*) as cnt FROM games g ${where}`
+  ).get(...params) as { cnt: number };
+
+  const games = db.prepare(
+    `SELECT g.*, re.name as red_engine_name, be.name as black_engine_name
+     FROM games g
+     JOIN engines re ON g.red_engine_id = re.id
+     JOIN engines be ON g.black_engine_id = be.id
+     ${where}
+     ORDER BY g.finished_at DESC
+     LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset) as (Game & { red_engine_name: string; black_engine_name: string })[];
+
+  return { games, total: countRow.cnt };
 }
 
 // ── System Stats ──────────────────────────────────────────────────────

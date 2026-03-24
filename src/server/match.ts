@@ -79,6 +79,7 @@ export interface MatchConfig {
   timeBase: number; // ms
   timeInc: number; // ms
   gameId: string;
+  startFen?: string;
 }
 
 export interface MatchResult {
@@ -107,7 +108,7 @@ export class Match extends EventEmitter {
     let redTime = timeBase;
     let blackTime = timeBase;
     const storedMoves: StoredMove[] = [];
-    let gameState = parseFen(INITIAL_FEN);
+    let gameState = parseFen(this.config.startFen || INITIAL_FEN);
 
     // Unified repetition tracking
     const plyHistory: PlyMeta[] = [];
@@ -167,6 +168,22 @@ export class Match extends EventEmitter {
       });
       this.blackEngine.on("error", () => {
         blackCrashed = true;
+      });
+
+      // Forward engine thinking events for live PV display
+      this.redEngine.on("thinking", (info) => {
+        this.emit("engine_thinking", {
+          gameId,
+          side: "red" as const,
+          ...info,
+        });
+      });
+      this.blackEngine.on("thinking", (info) => {
+        this.emit("engine_thinking", {
+          gameId,
+          side: "black" as const,
+          ...info,
+        });
       });
 
       // 2. Game loop
@@ -307,6 +324,7 @@ export class Match extends EventEmitter {
           fen: newFen,
           time_ms: elapsed,
           eval: evalScore,
+          depth: goResult.depth,
         };
         storedMoves.push(storedMove);
 
@@ -320,6 +338,9 @@ export class Match extends EventEmitter {
           move: canonicalMove,
           fen: newFen,
           eval: evalScore,
+          depth: goResult.depth,
+          nodes: goResult.nodes,
+          pv: goResult.pv,
           redTime,
           blackTime,
           timeMs: elapsed,

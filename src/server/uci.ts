@@ -12,6 +12,9 @@ export interface GoOptions {
 export interface GoResult {
   bestmove: string;
   eval: number | null;
+  depth: number | null;
+  nodes: number | null;
+  pv: string | null;
 }
 
 /**
@@ -155,25 +158,56 @@ export class UciEngine extends EventEmitter {
     );
 
     let lastEval: number | null = null;
+    let lastDepth: number | null = null;
+    let lastNodes: number | null = null;
+    let lastPv: string | null = null;
+
+    let lastThinkingEmit = 0;
+    const THINKING_THROTTLE_MS = 500;
 
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.off("line", handler);
+      };
+
       const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error("Engine timed out waiting for bestmove"));
       }, 60000);
 
       const handler = (line: string) => {
-        if (line.startsWith("info ") && line.includes("score")) {
-          const cpMatch = line.match(/score cp (-?\d+)/);
-          const mateMatch = line.match(/score mate (-?\d+)/);
-          if (cpMatch) lastEval = parseInt(cpMatch[1], 10);
-          else if (mateMatch) lastEval = parseInt(mateMatch[1], 10) > 0 ? 30000 : -30000;
+        if (line.startsWith("info ")) {
+          if (line.includes("score")) {
+            const cpMatch = line.match(/score cp (-?\d+)/);
+            const mateMatch = line.match(/score mate (-?\d+)/);
+            if (cpMatch) lastEval = parseInt(cpMatch[1], 10);
+            else if (mateMatch) lastEval = parseInt(mateMatch[1], 10) > 0 ? 30000 : -30000;
+          }
+          const depthMatch = line.match(/\bdepth (\d+)/);
+          if (depthMatch) lastDepth = parseInt(depthMatch[1], 10);
+          const nodesMatch = line.match(/\bnodes (\d+)/);
+          if (nodesMatch) lastNodes = parseInt(nodesMatch[1], 10);
+          const pvMatch = line.match(/\bpv (.+)/);
+          if (pvMatch) lastPv = pvMatch[1].trim();
+
+          // Throttled thinking event for live PV display
+          const now = Date.now();
+          if (now - lastThinkingEmit >= THINKING_THROTTLE_MS && lastDepth !== null) {
+            lastThinkingEmit = now;
+            this.emit("thinking", {
+              depth: lastDepth,
+              eval: lastEval,
+              nodes: lastNodes,
+              pv: lastPv,
+            });
+          }
         }
 
         if (line.startsWith("bestmove")) {
-          clearTimeout(timeout);
-          this.off("line", handler);
+          cleanup();
           const move = line.split(" ")[1];
-          resolve({ bestmove: move, eval: lastEval });
+          resolve({ bestmove: move, eval: lastEval, depth: lastDepth, nodes: lastNodes, pv: lastPv });
         }
       };
 

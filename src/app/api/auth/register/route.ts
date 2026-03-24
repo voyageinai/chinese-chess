@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { hashPassword, signToken, validateInviteCode } from "@/server/auth";
-import { createUser, getUserByUsername, getInviteCodeByCode, useInviteCode } from "@/db/queries";
+import { createUser, getUserByUsername, getInviteCodeByCode, useInviteCode as markInviteCodeUsed } from "@/db/queries";
 import { logAudit } from "@/server/audit";
 
 export async function POST(request: Request) {
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 
     // Mark DB invite code as used (atomic — useInviteCode checks used_by IS NULL)
     if (isDbCode) {
-      useInviteCode(inviteCode, user.id);
+      markInviteCodeUsed(inviteCode, user.id);
     }
 
     logAudit("user.register", user.id, "user", user.id, {

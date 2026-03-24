@@ -159,6 +159,7 @@ export async function POST(
     runner.on("game_start", (msg) => wsHub.broadcast(msg));
     runner.on("game_end", (msg) => wsHub.broadcast(msg));
     runner.on("tournament_end", (msg) => wsHub.broadcast(msg));
+    runner.on("engine_thinking", (msg) => wsHub.broadcast(msg, true));
     runner.run().catch((err) => console.error("Tournament error:", err));
 
     logAudit("tournament.start", user.id, "tournament", id, {

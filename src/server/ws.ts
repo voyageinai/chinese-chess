@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import type { WsMessage } from "@/lib/types";
@@ -76,7 +77,7 @@ export class WsHub {
     this.gameSubscribers.get(gameId)?.delete(ws);
   }
 
-  broadcast(message: WsMessage): void {
+  broadcast(message: WsMessage, subscribersOnly = false): void {
     const data = JSON.stringify(message);
     const delivered = new Set<WebSocket>();
 
@@ -94,7 +95,8 @@ export class WsHub {
     }
 
     // Also broadcast to ALL connected clients (for live game list on home page)
-    if (this.wss) {
+    // Skip for high-frequency messages (engine_thinking) to save bandwidth
+    if (!subscribersOnly && this.wss) {
       for (const ws of this.wss.clients) {
         if (delivered.has(ws)) continue;
         if (ws.readyState === WebSocket.OPEN) ws.send(data);

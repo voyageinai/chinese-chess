@@ -18,6 +18,7 @@ interface LeaderboardEngine {
   losses: number;
   draws: number;
   owner?: string;
+  elo_delta?: number | null;
 }
 
 interface LeaderboardProps {
@@ -36,6 +37,18 @@ const CHINESE_NUMERALS = [
   "九",
   "十",
 ];
+
+function getEloCI(w: number, l: number, d: number): number | null {
+  const N = w + l + d;
+  if (N < 10) return null;
+  const mu = (w + d * 0.5) / N;
+  const se = Math.sqrt(mu * (1 - mu) / N);
+  const lo = Math.max(0.001, mu - 1.96 * se);
+  const hi = Math.min(0.999, mu + 1.96 * se);
+  const eloLo = -400 * Math.log10(1 / lo - 1);
+  const eloHi = -400 * Math.log10(1 / hi - 1);
+  return Math.round((eloHi - eloLo) / 2);
+}
 
 function toChineseNumeral(n: number): string {
   if (n <= 0) return String(n);
@@ -121,6 +134,19 @@ export function Leaderboard({ engines }: LeaderboardProps) {
                 )}
                 <TableCell className="text-right font-mono text-sm">
                   {Math.round(engine.elo)}
+                  {(() => {
+                    const ci = getEloCI(engine.wins, engine.losses, engine.draws);
+                    return ci !== null ? (
+                      <span className="text-ink-muted text-xs ml-1">±{ci}</span>
+                    ) : null;
+                  })()}
+                  {engine.elo_delta != null && engine.elo_delta !== 0 && (
+                    <span
+                      className={`text-xs ml-1.5 ${engine.elo_delta > 0 ? "text-green-700" : "text-vermilion"}`}
+                    >
+                      {engine.elo_delta > 0 ? "+" : ""}{engine.elo_delta}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm text-green-700">
                   {engine.wins}

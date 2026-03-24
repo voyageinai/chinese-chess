@@ -79,6 +79,13 @@ export default function GamePage({
   /** Which side is currently thinking (for live clock countdown), null = stopped */
   const activeSideRef = useRef<"red" | "black" | null>(null);
   const [, forceRender] = useState(0);
+  const [thinkingInfo, setThinkingInfo] = useState<{
+    side: "red" | "black";
+    depth: number | null;
+    eval: number | null;
+    nodes: number | null;
+    pv: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -211,7 +218,13 @@ export default function GamePage({
         const msg = JSON.parse(event.data);
         if (msg.type === "game_start" && msg.gameId === id) {
           setClock(msg.redTime, msg.blackTime);
-          setActiveSide("red");
+          // Determine first mover from startFen if provided
+          if (msg.startFen) {
+            const parts = msg.startFen.split(" ");
+            setActiveSide(parts[1] === "b" ? "black" : "red");
+          } else {
+            setActiveSide("red");
+          }
         }
         if (msg.type === "move" && msg.gameId === id) {
           const currentPly = movesRef.current.length;
@@ -232,6 +245,7 @@ export default function GamePage({
               fen: msg.fen,
               time_ms: msg.timeMs,
               eval: msg.eval,
+              depth: msg.depth ?? null,
             },
           ];
           movesRef.current = next;
@@ -250,8 +264,18 @@ export default function GamePage({
           );
           setActiveSide(nextSide);
         }
+        if (msg.type === "engine_thinking" && msg.gameId === id) {
+          setThinkingInfo({
+            side: msg.side,
+            depth: msg.depth,
+            eval: msg.eval,
+            nodes: msg.nodes,
+            pv: msg.pv,
+          });
+        }
         if (msg.type === "game_end" && msg.gameId === id) {
           setActiveSide(null);
+          setThinkingInfo(null);
           setGame((prev) =>
             prev ? { ...prev, result: msg.result } : prev,
           );
@@ -399,6 +423,41 @@ export default function GamePage({
             {formatTime(redTime)}
           </span>
         </div>
+
+        {/* Engine thinking info (live) */}
+        {thinkingInfo && !game.result && (
+          <div className="w-full max-w-[460px] px-3 py-2 bg-paper-200/50 rounded-lg">
+            <div className="flex items-center gap-2 text-xs font-mono text-ink-muted">
+              <span className={thinkingInfo.side === "red" ? "text-vermilion" : "text-ink"}>
+                {thinkingInfo.side === "red" ? "红" : "黑"}
+              </span>
+              {thinkingInfo.depth != null && <span>D{thinkingInfo.depth}</span>}
+              {thinkingInfo.nodes != null && (
+                <span>{thinkingInfo.nodes > 1000000
+                  ? `${(thinkingInfo.nodes / 1000000).toFixed(1)}M`
+                  : thinkingInfo.nodes > 1000
+                    ? `${(thinkingInfo.nodes / 1000).toFixed(0)}K`
+                    : thinkingInfo.nodes} 节点</span>
+              )}
+              {thinkingInfo.eval != null && (
+                <span className={thinkingInfo.eval > 0 ? "text-vermilion" : thinkingInfo.eval < 0 ? "text-ink" : ""}>
+                  {thinkingInfo.eval > 0 ? "+" : ""}{(thinkingInfo.eval / 100).toFixed(2)}
+                </span>
+              )}
+            </div>
+            {thinkingInfo.pv && (
+              <p className="text-xs font-mono text-ink-muted/70 mt-1 truncate">
+                {thinkingInfo.pv}
+              </p>
+            )}
+          </div>
+        )}
+        {/* Stored depth for replay (non-live) */}
+        {(game.result || !thinkingInfo) && currentIndex >= 0 && moves[currentIndex]?.depth != null && (
+          <div className="w-full max-w-[460px] text-center text-xs text-ink-muted font-mono py-1">
+            深度 {moves[currentIndex].depth}
+          </div>
+        )}
       </div>
 
       {/* Right: Info panel */}

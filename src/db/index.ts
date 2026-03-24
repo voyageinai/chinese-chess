@@ -14,6 +14,7 @@ export function getDb(dbPath?: string): Database.Database {
     const resolvedPath = dbPath || DEFAULT_DB_PATH;
     db = new Database(resolvedPath);
     db.pragma("journal_mode = WAL");
+    db.pragma("busy_timeout = 5000");
     db.pragma("foreign_keys = ON");
     db.exec(SCHEMA);
     runMigrations(db);
@@ -152,6 +153,36 @@ function runMigrations(database: Database.Database): void {
     database.exec(
       "ALTER TABLE tournaments ADD COLUMN type TEXT NOT NULL DEFAULT 'tournament'",
     );
+  }
+
+  // -- v6: Opening FEN support + game indexes --
+  if (!hasColumn(database, "games", "opening_fen")) {
+    database.exec("ALTER TABLE games ADD COLUMN opening_fen TEXT");
+  }
+  database.exec("CREATE INDEX IF NOT EXISTS idx_games_red ON games(red_engine_id)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_games_black ON games(black_engine_id)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_games_result ON games(result)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_games_finished ON games(finished_at)");
+
+  // -- v7: Elo history tracking + tournament format --
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS elo_history (
+      id TEXT PRIMARY KEY,
+      engine_id TEXT NOT NULL REFERENCES engines(id),
+      elo REAL NOT NULL,
+      game_id TEXT REFERENCES games(id),
+      recorded_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )
+  `);
+  database.exec("CREATE INDEX IF NOT EXISTS idx_elo_history_engine ON elo_history(engine_id)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_elo_history_time ON elo_history(recorded_at)");
+
+  if (!hasColumn(database, "tournaments", "format")) {
+    database.exec("ALTER TABLE tournaments ADD COLUMN format TEXT NOT NULL DEFAULT 'round_robin'");
+  }
+
+  if (!hasColumn(database, "games", "round")) {
+    database.exec("ALTER TABLE games ADD COLUMN round INTEGER");
   }
 }
 
