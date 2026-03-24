@@ -53,6 +53,12 @@ function uciToLastMove(
   };
 }
 
+/** Which side moves at a given ply, accounting for opening_fen turn. */
+function sideAtPly(ply: number, openingFen?: string | null): "red" | "black" {
+  const blackFirst = openingFen?.split(" ")[1] === "b";
+  return (ply % 2 === 0) === !blackFirst ? "red" : "black";
+}
+
 function formatTime(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const min = Math.floor(totalSec / 60);
@@ -141,7 +147,7 @@ export default function GamePage({
         );
         const wallElapsed = (Date.now() / 1000 - data.game.started_at) * 1000;
         const thinkingElapsed = Math.max(0, wallElapsed - totalMoveMs);
-        const side = parsedMoves.length % 2 === 0 ? "red" : "black";
+        const side = sideAtPly(parsedMoves.length, data.game.opening_fen);
         setClock(
           side === "red" ? rTime - thinkingElapsed : rTime,
           side === "black" ? bTime - thinkingElapsed : bTime,
@@ -152,7 +158,7 @@ export default function GamePage({
 
       setClock(rTime, bTime);
       if (!data.game.result && data.game.started_at) {
-        setActiveSide("red");
+        setActiveSide(sideAtPly(0, data.game.opening_fen));
       } else {
         setActiveSide(null);
       }
@@ -259,7 +265,7 @@ export default function GamePage({
           setMoves(next);
           setCurrentIndex(msg.ply - 1);
 
-          const nextSide = msg.ply % 2 === 0 ? "red" : "black";
+          const nextSide = sideAtPly(msg.ply, game?.opening_fen);
 
           // Compensate for network delay: the server included movedAt timestamp,
           // so we know how stale the clock values are. Subtract the lag from
@@ -414,10 +420,11 @@ export default function GamePage({
     [moves.length],
   );
 
+  const baseFen = game?.opening_fen || INITIAL_FEN;
   const currentFen =
     currentIndex < 0
-      ? INITIAL_FEN
-      : moves[currentIndex]?.fen || INITIAL_FEN;
+      ? baseFen
+      : moves[currentIndex]?.fen || baseFen;
 
   const lastMove =
     currentIndex >= 0 && moves[currentIndex]
@@ -536,6 +543,7 @@ export default function GamePage({
           moves={moves}
           currentIndex={currentIndex}
           onSelect={navigate}
+          blackMovesFirst={game?.opening_fen?.split(" ")[1] === "b"}
         />
 
         {/* Eval chart */}

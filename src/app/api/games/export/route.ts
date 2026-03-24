@@ -44,7 +44,13 @@ export async function GET(request: NextRequest) {
       if (g.opening_fen) lines.push(`[FEN "${g.opening_fen}"]`);
       lines.push("");
       const moves = JSON.parse(g.moves || "[]") as { move: string }[];
+      const blackFirst = g.opening_fen?.split(" ")[1] === "b";
       const moveStr = moves.map((m, i) => {
+        if (blackFirst) {
+          if (i === 0) return `1. ... ${m.move}`;
+          const num = Math.floor((i - 1) / 2) + 2;
+          return (i - 1) % 2 === 0 ? `${num}. ${m.move}` : m.move;
+        }
         const num = Math.floor(i / 2) + 1;
         return i % 2 === 0 ? `${num}. ${m.move}` : m.move;
       }).join(" ");

@@ -6,17 +6,29 @@ interface MoveListProps {
   moves: StoredMove[];
   currentIndex: number; // -1 = start position, 0 = after first move, etc.
   onSelect: (index: number) => void;
+  blackMovesFirst?: boolean; // true when opening_fen has turn "b"
 }
 
-export function MoveList({ moves, currentIndex, onSelect }: MoveListProps) {
+export function MoveList({ moves, currentIndex, onSelect, blackMovesFirst }: MoveListProps) {
   // Group moves into pairs: (red move, black move)
-  const pairs: { moveNum: number; red: StoredMove; black?: StoredMove }[] = [];
-  for (let i = 0; i < moves.length; i += 2) {
+  // When black moves first, the first pair has no red move
+  const pairs: { moveNum: number; red?: StoredMove; redIdx?: number; black?: StoredMove; blackIdx?: number }[] = [];
+  let i = 0;
+  let moveNum = 1;
+  if (blackMovesFirst && moves.length > 0) {
+    pairs.push({ moveNum, black: moves[0], blackIdx: 0 });
+    i = 1;
+    moveNum = 2;
+  }
+  for (; i < moves.length; i += 2) {
     pairs.push({
-      moveNum: Math.floor(i / 2) + 1,
+      moveNum,
       red: moves[i],
+      redIdx: i,
       black: moves[i + 1],
+      blackIdx: i + 1 < moves.length ? i + 1 : undefined,
     });
+    moveNum++;
   }
 
   return (
@@ -39,10 +51,7 @@ export function MoveList({ moves, currentIndex, onSelect }: MoveListProps) {
               </tr>
             </thead>
             <tbody>
-              {pairs.map((pair) => {
-                const redIdx = (pair.moveNum - 1) * 2;
-                const blackIdx = redIdx + 1;
-                return (
+              {pairs.map((pair) => (
                   <tr
                     key={pair.moveNum}
                     className="border-t border-paper-200/50"
@@ -51,23 +60,25 @@ export function MoveList({ moves, currentIndex, onSelect }: MoveListProps) {
                       {pair.moveNum}
                     </td>
                     <td className="pl-2 py-0.5">
-                      <button
-                        onClick={() => onSelect(redIdx)}
-                        className={`px-1.5 py-0.5 rounded font-mono text-xs transition-colors ${
-                          currentIndex === redIdx
-                            ? "bg-vermilion text-paper-50 font-semibold"
-                            : "text-vermilion hover:bg-paper-200/60"
-                        }`}
-                      >
-                        {pair.red.move}
-                      </button>
+                      {pair.red != null && pair.redIdx != null && (
+                        <button
+                          onClick={() => onSelect(pair.redIdx!)}
+                          className={`px-1.5 py-0.5 rounded font-mono text-xs transition-colors ${
+                            currentIndex === pair.redIdx
+                              ? "bg-vermilion text-paper-50 font-semibold"
+                              : "text-vermilion hover:bg-paper-200/60"
+                          }`}
+                        >
+                          {pair.red.move}
+                        </button>
+                      )}
                     </td>
                     <td className="pl-2 py-0.5">
-                      {pair.black && (
+                      {pair.black != null && pair.blackIdx != null && (
                         <button
-                          onClick={() => onSelect(blackIdx)}
+                          onClick={() => onSelect(pair.blackIdx!)}
                           className={`px-1.5 py-0.5 rounded font-mono text-xs transition-colors ${
-                            currentIndex === blackIdx
+                            currentIndex === pair.blackIdx
                               ? "bg-ink text-paper-50 font-semibold"
                               : "text-ink hover:bg-paper-200/60"
                           }`}
@@ -77,8 +88,7 @@ export function MoveList({ moves, currentIndex, onSelect }: MoveListProps) {
                       )}
                     </td>
                   </tr>
-                );
-              })}
+                ))}
             </tbody>
           </table>
         )}
