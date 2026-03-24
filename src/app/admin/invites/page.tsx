@@ -20,6 +20,14 @@ export default function AdminInvitesPage() {
   const [expiresInDays, setExpiresInDays] = useState("7");
   const [newCode, setNewCode] = useState("");
   const [actionError, setActionError] = useState("");
+  const [copiedCode, setCopiedCode] = useState("");
+
+  function copyToClipboard(code: string) {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode(""), 2000);
+    });
+  }
 
   async function loadInvites() {
     try {
@@ -105,9 +113,18 @@ export default function AdminInvitesPage() {
           </Button>
         </div>
         {newCode && (
-          <div className="mt-3 p-3 bg-green-50 rounded text-sm">
-            <p className="text-green-800 font-medium">新邀请码已生成：</p>
-            <code className="text-green-900 font-mono select-all">{newCode}</code>
+          <div className="mt-3 p-3 bg-green-50 rounded text-sm flex items-center gap-3">
+            <div className="flex-1">
+              <p className="text-green-800 font-medium mb-1">新邀请码已生成：</p>
+              <code className="text-green-900 font-mono select-all break-all">{newCode}</code>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyToClipboard(newCode)}
+            >
+              {copiedCode === newCode ? "已复制" : "复制"}
+            </Button>
           </div>
         )}
       </div>
@@ -144,7 +161,13 @@ export default function AdminInvitesPage() {
               return (
                 <tr key={inv.code} className="border-b border-paper-200">
                   <td className="py-3 pr-4 font-mono text-ink text-xs">
-                    {inv.code.substring(0, 8)}...
+                    <span className="select-all break-all">{inv.code}</span>
+                    <button
+                      className="ml-2 text-ink-muted hover:text-ink text-xs underline"
+                      onClick={() => copyToClipboard(inv.code)}
+                    >
+                      {copiedCode === inv.code ? "已复制" : "复制"}
+                    </button>
                   </td>
                   <td className="py-3 pr-4">
                     <span className={`px-2 py-0.5 rounded text-xs ${statusCls}`}>

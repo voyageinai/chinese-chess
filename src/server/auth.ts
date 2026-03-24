@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
-const INVITE_CODE = process.env.INVITE_CODE || "changeme";
+const INVITE_CODE = process.env.INVITE_CODE || "zhumadian";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
