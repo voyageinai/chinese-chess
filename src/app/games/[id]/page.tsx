@@ -91,6 +91,8 @@ export default function GamePage({
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number>(0);
   const resyncPromiseRef = useRef<Promise<void> | null>(null);
+  /** Timestamp of the last WS message for this game — used by polling fallback */
+  const lastWsMessageRef = useRef<number>(Date.now());
 
   /** Update clock refs and sync to React state for display */
   function setClock(red: number, black: number) {
@@ -163,7 +165,7 @@ export default function GamePage({
       if (showSpinner) setLoading(true);
 
       try {
-        const response = await fetch(`/api/games/${id}`);
+        const response = await fetch(`/api/games/${id}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Game not found");
         const data = await response.json();
         applySnapshot(data);
@@ -212,10 +214,15 @@ export default function GamePage({
         reconnectDelay = 1000; // reset backoff on successful connect
         ws!.send(JSON.stringify({ type: "subscribe", gameId: id }));
         requestResync();
+        lastWsMessageRef.current = Date.now(); // prevent polling from firing right after reconnect
       };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
+        // Track last WS activity for this game — polling fallback uses this
+        if ("gameId" in msg && msg.gameId === id) {
+          lastWsMessageRef.current = Date.now();
+        }
         if (msg.type === "game_start" && msg.gameId === id) {
           setClock(msg.redTime, msg.blackTime);
           // Determine first mover from startFen if provided
@@ -277,8 +284,11 @@ export default function GamePage({
           setActiveSide(null);
           setThinkingInfo(null);
           setGame((prev) =>
-            prev ? { ...prev, result: msg.result } : prev,
+            prev ? { ...prev, result: msg.result, result_reason: msg.reason } : prev,
           );
+          // Fetch complete final state — ensures all moves and clocks are correct
+          // even if some move messages were lost before game_end
+          requestResync();
         }
       };
 
@@ -311,6 +321,41 @@ export default function GamePage({
       if (ws) ws.close();
     };
   }, [canSubscribe, id, requestResync]);
+
+  // --- Resync on tab visibility change ---
+  // When the user switches back to this tab, the rAF clock may have drifted
+  // (capped at 200ms per frame) and WS messages may have been throttled/dropped.
+  useEffect(() => {
+    if (!canSubscribe) return;
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        lastFrameRef.current = performance.now(); // prevent clock jump
+        requestResync();
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [canSubscribe, requestResync]);
+
+  // --- Polling fallback for silent WS failures ---
+  // If no WS message arrives for 5 seconds during an active game, fetch via HTTP.
+  // This catches cases where the WS connection appears alive but messages are lost
+  // (tab backgrounding, proxy buffering, network micro-outages).
+  useEffect(() => {
+    if (!canSubscribe) return;
+
+    const POLL_FALLBACK_MS = 5_000;
+    const timer = setInterval(() => {
+      if (Date.now() - lastWsMessageRef.current >= POLL_FALLBACK_MS) {
+        requestResync();
+        lastWsMessageRef.current = Date.now(); // prevent hammering
+      }
+    }, POLL_FALLBACK_MS);
+
+    return () => clearInterval(timer);
+  }, [canSubscribe, requestResync]);
 
   // --- requestAnimationFrame clock countdown ---
   // Uses delta time for accuracy; caps at 200ms to handle tab backgrounding.
