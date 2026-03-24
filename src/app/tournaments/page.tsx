@@ -226,7 +226,7 @@ export default function TournamentsPage() {
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleCreate} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-                {formFormat !== "swiss" && (
+                {formFormat !== "swiss" && formFormat !== "gauntlet" && (
                   <div className="space-y-1.5">
                     <Label htmlFor="name">名称</Label>
                     <Input
