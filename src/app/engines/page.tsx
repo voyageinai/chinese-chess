@@ -139,9 +139,11 @@ export default function EnginesPage() {
     try {
       const lbRes = await fetch("/api/leaderboard");
       const lbData = await lbRes.json();
-      const top = (lbData.leaderboard ?? [])
-        .filter((e: { id: string }) => e.id !== engineId)
-        .slice(0, 3);
+      const others = (lbData.leaderboard ?? [])
+        .filter((e: { id: string }) => e.id !== engineId);
+      const userEngines = others.filter((e: { user_id: string }) => e.user_id !== "__system__");
+      const systemEngines = others.filter((e: { user_id: string }) => e.user_id === "__system__");
+      const top = [...userEngines.slice(0, 3), ...systemEngines].slice(0, 3);
 
       if (top.length === 0) {
         setUploadError("暂无其他引擎可供定级");
