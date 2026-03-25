@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, use } from "react";
+import { useEffect, useState, useCallback, useRef, use, useMemo } from "react";
 import { Board } from "@/components/Board";
 import { MoveList } from "@/components/MoveList";
 import { EvalChart } from "@/components/EvalChart";
@@ -11,20 +11,10 @@ import {
   ChevronRight,
   SkipForward,
 } from "lucide-react";
-import { INITIAL_FEN, uciToSquare, rowOf, colOf } from "@/lib/constants";
+import { INITIAL_FEN } from "@/lib/constants";
+import { analyzeMoveDisplay, extractPvHeadMove } from "@/lib/move-display";
 import { translateResult } from "@/lib/results";
 import type { StoredMove, Game, Engine } from "@/lib/types";
-
-function uciToLastMove(
-  uci: string,
-): { from: [number, number]; to: [number, number] } {
-  const fromSq = uciToSquare(uci.slice(0, 2));
-  const toSq = uciToSquare(uci.slice(2, 4));
-  return {
-    from: [rowOf(fromSq), colOf(fromSq)],
-    to: [rowOf(toSq), colOf(toSq)],
-  };
-}
 
 /** Which side moves at a given ply, accounting for opening_fen turn. */
 function sideAtPly(ply: number, openingFen?: string | null): "red" | "black" {
@@ -50,6 +40,7 @@ export default function GamePage({
   const [blackEngine, setBlackEngine] = useState<Engine | null>(null);
   const [moves, setMoves] = useState<StoredMove[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   // --- Clock state: refs are the source of truth, state is for rendering ---
   const clockRef = useRef({ red: 0, black: 0 });
   const movesRef = useRef<StoredMove[]>([]);
@@ -396,21 +387,64 @@ export default function GamePage({
 
   const navigate = useCallback(
     (idx: number) => {
+      setPreviewIndex(null);
       setCurrentIndex(Math.max(-1, Math.min(moves.length - 1, idx)));
     },
     [moves.length],
   );
 
   const baseFen = game?.opening_fen || INITIAL_FEN;
+  const displayIndex = previewIndex ?? currentIndex;
   const currentFen =
-    currentIndex < 0
+    displayIndex < 0
       ? baseFen
-      : moves[currentIndex]?.fen || baseFen;
-
-  const lastMove =
-    currentIndex >= 0 && moves[currentIndex]
-      ? uciToLastMove(moves[currentIndex].move)
+      : moves[displayIndex]?.fen || baseFen;
+  const displayBaseFen =
+    displayIndex <= 0 ? baseFen : moves[displayIndex - 1]?.fen || baseFen;
+  const displayMoveMeta = useMemo(
+    () =>
+      displayIndex >= 0 && moves[displayIndex]
+        ? analyzeMoveDisplay(displayBaseFen, moves[displayIndex].move)
+        : null,
+    [displayBaseFen, displayIndex, moves],
+  );
+  const canShowLivePv =
+    previewIndex == null &&
+    thinkingInfo?.pv &&
+    !game?.result &&
+    currentIndex === moves.length - 1;
+  const pvHeadMove = useMemo(
+    () => (canShowLivePv ? extractPvHeadMove(thinkingInfo?.pv) : null),
+    [canShowLivePv, thinkingInfo?.pv],
+  );
+  const pvMoveMeta = useMemo(
+    () => (pvHeadMove ? analyzeMoveDisplay(currentFen, pvHeadMove) : null),
+    [currentFen, pvHeadMove],
+  );
+  const moveIndicators = useMemo(() => {
+    const indicators = [];
+    if (pvMoveMeta) {
+      indicators.push({
+        ...pvMoveMeta,
+        variant: "pv" as const,
+      });
+    }
+    if (displayMoveMeta) {
+      indicators.push({
+        ...displayMoveMeta,
+        preview: previewIndex != null,
+      });
+    }
+    return indicators;
+  }, [displayMoveMeta, previewIndex, pvMoveMeta]);
+  const moveAnimationKey =
+    previewIndex == null && currentIndex >= 0 && moves[currentIndex]
+      ? `${currentIndex}-${moves[currentIndex].move}`
       : undefined;
+  const displayTags = [
+    displayMoveMeta?.isCapture ? "吃子" : null,
+    displayMoveMeta?.isCheck ? "将军" : null,
+  ].filter(Boolean) as string[];
 
   const redName = redEngine?.name || game?.red_engine_id || "Red";
   const blackName = blackEngine?.name || game?.black_engine_id || "Black";
@@ -445,7 +479,35 @@ export default function GamePage({
           </span>
         </div>
 
-        <Board fen={currentFen} lastMove={lastMove} />
+        <Board
+          fen={currentFen}
+          moveIndicators={moveIndicators}
+          animateKey={moveAnimationKey}
+        />
+
+        {previewIndex != null && moves[previewIndex] && (
+          <div className="w-full max-w-[460px] text-center text-xs text-ink-muted font-mono py-1">
+            预览第 {previewIndex + 1} 手 {moves[previewIndex].move}
+            {displayTags.length > 0 ? ` · ${displayTags.join(" · ")}` : ""}
+          </div>
+        )}
+        {previewIndex == null && displayTags.length > 0 && (
+          <div className="w-full max-w-[460px] flex justify-center gap-2 text-[11px] font-mono py-1">
+            {displayTags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full border border-paper-300 bg-paper-100 px-2 py-0.5 text-ink-muted"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+        {pvMoveMeta && previewIndex == null && (
+          <div className="w-full max-w-[460px] text-center text-[11px] text-ink-muted font-mono py-1">
+            虚线为当前 PV 首着 {pvHeadMove}
+          </div>
+        )}
 
         {/* Red engine info bar */}
         <div className="w-full max-w-[460px] flex items-center justify-between px-3 py-2 bg-vermilion/10 rounded-lg">
@@ -486,9 +548,11 @@ export default function GamePage({
           </div>
         )}
         {/* Stored depth for replay (non-live) */}
-        {(game.result || !thinkingInfo) && currentIndex >= 0 && moves[currentIndex]?.depth != null && (
+        {(game.result || !thinkingInfo) &&
+          displayIndex >= 0 &&
+          moves[displayIndex]?.depth != null && (
           <div className="w-full max-w-[460px] text-center text-xs text-ink-muted font-mono py-1">
-            深度 {moves[currentIndex].depth}
+            深度 {moves[displayIndex].depth}
           </div>
         )}
       </div>
@@ -527,7 +591,10 @@ export default function GamePage({
         <MoveList
           moves={moves}
           currentIndex={currentIndex}
+          previewIndex={previewIndex}
           onSelect={navigate}
+          onPreview={(index) => setPreviewIndex(index === currentIndex ? null : index)}
+          onPreviewEnd={() => setPreviewIndex(null)}
           blackMovesFirst={game?.opening_fen?.split(" ")[1] === "b"}
         />
 

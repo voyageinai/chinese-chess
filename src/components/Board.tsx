@@ -1,13 +1,25 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useId, useMemo } from "react";
 import { parseFen } from "@/lib/fen";
 import { BOARD_COLS, BOARD_ROWS, INITIAL_FEN } from "@/lib/constants";
 import type { Piece, PieceKind, Color } from "@/lib/types";
 
+export interface BoardMoveIndicator {
+  from: [number, number];
+  to: [number, number];
+  side?: Color;
+  preview?: boolean;
+  variant?: "move" | "pv";
+  capture?: boolean;
+  check?: boolean;
+  checkedKing?: [number, number] | null;
+}
+
 interface BoardProps {
   fen?: string;
-  lastMove?: { from: [number, number]; to: [number, number] }; // [row, col] pairs
+  moveIndicators?: BoardMoveIndicator[];
+  animateKey?: string | number;
   width?: number;
 }
 
@@ -230,44 +242,239 @@ function PieceView({
   );
 }
 
-function LastMoveHighlight({
-  from,
-  to,
+function buildMovePath(from: [number, number], to: [number, number]) {
+  const fromX = toX(from[1]);
+  const fromY = toY(from[0]);
+  const toXPos = toX(to[1]);
+  const toYPos = toY(to[0]);
+  const deltaRow = to[0] - from[0];
+  const deltaCol = to[1] - from[1];
+  const clearance = 20;
+
+  const points: [number, number][] = [[fromX, fromY]];
+
+  if (Math.abs(deltaRow) === 2 && Math.abs(deltaCol) === 1) {
+    const legX = toX(from[1]);
+    const legY = toY(from[0] + Math.sign(deltaRow));
+    points.push([legX, legY]);
+  } else if (Math.abs(deltaRow) === 1 && Math.abs(deltaCol) === 2) {
+    const legX = toX(from[1] + Math.sign(deltaCol));
+    const legY = toY(from[0]);
+    points.push([legX, legY]);
+  }
+
+  points.push([toXPos, toYPos]);
+
+  const [firstX, firstY] = points[0];
+  const [secondX, secondY] = points[1];
+  const [penultimateX, penultimateY] = points[points.length - 2];
+  const [lastX, lastY] = points[points.length - 1];
+
+  const firstLength = Math.hypot(secondX - firstX, secondY - firstY) || 1;
+  const lastLength = Math.hypot(lastX - penultimateX, lastY - penultimateY) || 1;
+
+  const startX = firstX + ((secondX - firstX) / firstLength) * clearance;
+  const startY = firstY + ((secondY - firstY) / firstLength) * clearance;
+  const endX = lastX - ((lastX - penultimateX) / lastLength) * clearance;
+  const endY = lastY - ((lastY - penultimateY) / lastLength) * clearance;
+
+  const pathPoints: [number, number][] = [[startX, startY]];
+  if (points.length > 2) {
+    pathPoints.push(...points.slice(1, -1));
+  }
+  pathPoints.push([endX, endY]);
+
+  return {
+    d: pathPoints
+      .map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x} ${y}`)
+      .join(" "),
+    fromX,
+    fromY,
+    toX: toXPos,
+    toY: toYPos,
+  };
+}
+
+function OverlayBadge({
+  x,
+  y,
+  text,
+  color,
+  textColor = "var(--color-paper-50)",
 }: {
-  from: [number, number];
-  to: [number, number];
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  textColor?: string;
 }) {
-  const size = 12;
   return (
-    <>
-      <rect
-        x={toX(from[1]) - size}
-        y={toY(from[0]) - size}
-        width={size * 2}
-        height={size * 2}
-        rx={3}
-        fill="var(--color-vermilion-light)"
-        opacity={0.25}
+    <g>
+      <circle
+        cx={x}
+        cy={y}
+        r={10}
+        fill="var(--color-paper-50)"
+        stroke={color}
+        strokeWidth={1.5}
       />
-      <rect
-        x={toX(to[1]) - size}
-        y={toY(to[0]) - size}
-        width={size * 2}
-        height={size * 2}
-        rx={3}
-        fill="var(--color-vermilion-light)"
-        opacity={0.35}
+      <text
+        x={x}
+        y={y}
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill={textColor}
+        fontSize={10}
+        fontFamily="var(--font-sans)"
+        fontWeight={700}
+        style={{ paintOrder: "stroke", stroke: color, strokeWidth: 2 }}
+      >
+        {text}
+      </text>
+    </g>
+  );
+}
+
+function CheckAlert({ square }: { square: [number, number] }) {
+  const kingX = toX(square[1]);
+  const kingY = toY(square[0]);
+
+  return (
+    <g opacity={0.9}>
+      <circle
+        cx={kingX}
+        cy={kingY}
+        r={23}
+        fill="none"
+        stroke="var(--color-vermilion)"
+        strokeWidth={2.5}
+        strokeDasharray="5 5"
       />
-    </>
+      <circle
+        cx={kingX}
+        cy={kingY}
+        r={28}
+        fill="none"
+        stroke="var(--color-vermilion-light)"
+        strokeWidth={1.5}
+        opacity={0.45}
+      />
+      <OverlayBadge
+        x={kingX + 17}
+        y={kingY - 17}
+        text="将"
+        color="var(--color-vermilion)"
+      />
+    </g>
+  );
+}
+
+function MoveOverlay({
+  move,
+  markerId,
+  animate,
+}: {
+  move: BoardMoveIndicator;
+  markerId: string;
+  animate: boolean;
+}) {
+  const { d, fromX, fromY, toX: targetX, toY: targetY } = buildMovePath(
+    move.from,
+    move.to,
+  );
+  const variant = move.variant ?? "move";
+  const color =
+    move.side === "black" ? "var(--color-ink)" : "var(--color-vermilion)";
+  const isPreview = move.preview === true;
+  const isPv = variant === "pv";
+  const strokeWidth = isPv ? 3.5 : isPreview ? 4 : 5;
+  const overlayOpacity = isPv ? 0.44 : isPreview ? 0.5 : 0.72;
+  const dashArray = isPv ? "10 12" : isPreview ? "8 10" : undefined;
+
+  return (
+    <g
+      opacity={overlayOpacity}
+      style={
+        animate
+          ? { animation: "board-move-indicator 720ms cubic-bezier(0.22, 1, 0.36, 1)" }
+          : undefined
+      }
+    >
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray={dashArray}
+        markerEnd={`url(#${markerId})`}
+      />
+      <circle
+        cx={fromX}
+        cy={fromY}
+        r={isPv ? 8 : 10}
+        fill={color}
+        opacity={isPv ? 0.12 : isPreview ? 0.16 : 0.22}
+      />
+      <circle
+        cx={fromX}
+        cy={fromY}
+        r={isPv ? 3.5 : 4.5}
+        fill={color}
+        opacity={0.9}
+      />
+      <circle
+        cx={targetX}
+        cy={targetY}
+        r={isPv ? 20 : 24}
+        fill="none"
+        stroke={color}
+        strokeWidth={isPreview ? 2.5 : 3}
+      />
+      <circle
+        cx={targetX}
+        cy={targetY}
+        r={28}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        opacity={isPreview ? 0.24 : 0.32}
+      />
+      {move.capture && (
+        <OverlayBadge
+          x={targetX + 18}
+          y={targetY - 18}
+          text="吃"
+          color={color}
+        />
+      )}
+      {isPv && (
+        <OverlayBadge
+          x={targetX + 18}
+          y={targetY + 18}
+          text="PV"
+          color={color}
+          textColor={color}
+        />
+      )}
+      {move.check && move.checkedKing && <CheckAlert square={move.checkedKing} />}
+    </g>
   );
 }
 
 export function Board({
   fen = INITIAL_FEN,
-  lastMove,
+  moveIndicators = [],
+  animateKey,
   width,
 }: BoardProps) {
+  const boardId = useId().replaceAll(":", "");
   const gameState = useMemo(() => parseFen(fen), [fen]);
+  const primaryIndicatorIndex =
+    animateKey != null
+      ? moveIndicators.findIndex((indicator) => !indicator.preview && indicator.variant !== "pv")
+      : -1;
 
   const pieces: { piece: Piece; row: number; col: number }[] = [];
   for (let r = 0; r < BOARD_ROWS; r++) {
@@ -286,6 +493,49 @@ export function Board({
       className="select-none"
       style={{ maxWidth: "100%", height: "auto" }}
     >
+      <defs>
+        <marker
+          id={`${boardId}-move-arrow-red`}
+          markerWidth="10"
+          markerHeight="10"
+          refX="8"
+          refY="5"
+          orient="auto"
+          markerUnits="userSpaceOnUse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-vermilion)" />
+        </marker>
+        <marker
+          id={`${boardId}-move-arrow-black`}
+          markerWidth="10"
+          markerHeight="10"
+          refX="8"
+          refY="5"
+          orient="auto"
+          markerUnits="userSpaceOnUse"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-ink)" />
+        </marker>
+      </defs>
+
+      <style>
+        {`
+          @keyframes board-move-indicator {
+            0% {
+              opacity: 0;
+              filter: saturate(0.8);
+            }
+            35% {
+              opacity: 1;
+            }
+            100% {
+              opacity: 1;
+              filter: saturate(1);
+            }
+          }
+        `}
+      </style>
+
       {/* Board background */}
       <rect
         x={0}
@@ -302,10 +552,23 @@ export function Board({
       {/* River text */}
       <RiverLabel />
 
-      {/* Last move highlight */}
-      {lastMove && (
-        <LastMoveHighlight from={lastMove.from} to={lastMove.to} />
-      )}
+      {/* Move indicators */}
+      {moveIndicators.map((indicator, index) => (
+        <MoveOverlay
+          key={
+            index === primaryIndicatorIndex
+              ? `move-${animateKey}`
+              : `${indicator.variant ?? "move"}-${indicator.from.join("-")}-${indicator.to.join("-")}-${indicator.preview ? "preview" : "active"}-${indicator.capture ? "capture" : "quiet"}-${indicator.check ? "check" : "safe"}`
+          }
+          move={indicator}
+          animate={index === primaryIndicatorIndex}
+          markerId={
+            indicator.side === "black"
+              ? `${boardId}-move-arrow-black`
+              : `${boardId}-move-arrow-red`
+          }
+        />
+      ))}
 
       {/* Pieces */}
       {pieces.map(({ piece, row, col }) => (
