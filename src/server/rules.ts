@@ -1,4 +1,4 @@
-import type { Board, Color, GameState, Move, Piece, PieceKind, Square } from "@/lib/types";
+import type { Board, Color, GameState, Move, Square } from "@/lib/types";
 import {
   BOARD_COLS,
   BOARD_ROWS,
@@ -35,13 +35,36 @@ function inBounds(r: number, c: number): boolean {
   return r >= 0 && r < BOARD_ROWS && c >= 0 && c < BOARD_COLS;
 }
 
-function findKing(board: Board, color: Color): Square {
+function findKing(board: Board, color: Color): Square | null {
   for (let i = 0; i < BOARD_SIZE; i++) {
     const p = board[i];
     if (p && p.color === color && p.kind === "k") return i;
   }
-  // Should never happen in a valid position
-  return -1;
+  return null;
+}
+
+export function findKingSquare(board: Board, color: Color): Square | null {
+  return findKing(board, color);
+}
+
+export function hasBothKings(state: GameState): boolean {
+  return findKing(state.board, "red") !== null && findKing(state.board, "black") !== null;
+}
+
+function kingsFaceEachOther(board: Board): { redKingSq: Square; blackKingSq: Square } | null {
+  const redKingSq = findKing(board, "red");
+  const blackKingSq = findKing(board, "black");
+  if (redKingSq === null || blackKingSq === null) return null;
+  if (colOf(redKingSq) !== colOf(blackKingSq)) return null;
+
+  const file = colOf(redKingSq);
+  const minRow = Math.min(rowOf(redKingSq), rowOf(blackKingSq));
+  const maxRow = Math.max(rowOf(redKingSq), rowOf(blackKingSq));
+  for (let row = minRow + 1; row < maxRow; row++) {
+    if (board[makeSquare(row, file)]) return null;
+  }
+
+  return { redKingSq, blackKingSq };
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +122,10 @@ function generatePseudoMoves(state: GameState): Move[] {
   }
 
   return moves;
+}
+
+export function generatePseudoMovesForColor(state: GameState, color: Color): Move[] {
+  return generatePseudoMoves({ ...state, turn: color });
 }
 
 function addMove(
@@ -290,6 +317,17 @@ function generateKingMoves(
     if (!inPalace(destSq, turn)) continue;
     addMove(board, turn, sq, nr, nc, moves);
   }
+
+  const facing = kingsFaceEachOther(board);
+  if (!facing) return;
+
+  const opponentKingSq = turn === "red" ? facing.blackKingSq : facing.redKingSq;
+  if (opponentKingSq !== sq && colOf(opponentKingSq) === c) {
+    const target = board[opponentKingSq];
+    if (target?.color !== turn) {
+      moves.push({ from: sq, to: opponentKingSq, capture: target ?? undefined });
+    }
+  }
 }
 
 // -- Pawn: forward on own side; forward or sideways after crossing river --
@@ -329,28 +367,15 @@ function generatePawnMoves(
 export function isInCheck(state: GameState, color: Color): boolean {
   const { board } = state;
   const kingSq = findKing(board, color);
-  if (kingSq === -1) return false;
+  if (kingSq === null) return false;
 
   // Flying general rule
   const opp = opponent(color);
-  const oppKingSq = findKing(board, opp);
-  if (oppKingSq !== -1) {
-    const kCol = colOf(kingSq);
-    const oCol = colOf(oppKingSq);
-    if (kCol === oCol) {
-      const kRow = rowOf(kingSq);
-      const oRow = rowOf(oppKingSq);
-      const minRow = Math.min(kRow, oRow);
-      const maxRow = Math.max(kRow, oRow);
-      let blocked = false;
-      for (let rr = minRow + 1; rr < maxRow; rr++) {
-        if (board[makeSquare(rr, kCol)]) {
-          blocked = true;
-          break;
-        }
-      }
-      if (!blocked) return true;
-    }
+  const facing = kingsFaceEachOther(board);
+  if (facing) {
+    return color === "red"
+      ? facing.redKingSq === kingSq
+      : facing.blackKingSq === kingSq;
   }
 
   // Check if any opponent piece attacks the king square.
@@ -374,6 +399,8 @@ export function isInCheck(state: GameState, color: Color): boolean {
  * A legal move is a pseudo-legal move that does not leave the own king in check.
  */
 export function generateMoves(state: GameState): Move[] {
+  if (!hasBothKings(state)) return [];
+
   const pseudoMoves = generatePseudoMoves(state);
   const legalMoves: Move[] = [];
 
@@ -434,14 +461,49 @@ export function applyMove(state: GameState, move: Move): GameState {
 // Checkmate / Stalemate
 // ---------------------------------------------------------------------------
 
+export interface BoardTerminal {
+  kind: "king_capture" | "checkmate" | "stalemate";
+  winner: Color;
+  loser: Color;
+}
+
+export function classifyBoardTerminal(
+  state: GameState,
+  lastMover: Color,
+): BoardTerminal | null {
+  const redKing = findKing(state.board, "red");
+  const blackKing = findKing(state.board, "black");
+
+  if (redKing === null && blackKing !== null) {
+    return { kind: "king_capture", winner: "black", loser: "red" };
+  }
+  if (blackKing === null && redKing !== null) {
+    return { kind: "king_capture", winner: "red", loser: "black" };
+  }
+  if (redKing === null || blackKing === null) {
+    return null;
+  }
+
+  if (isCheckmate(state)) {
+    return { kind: "checkmate", winner: lastMover, loser: state.turn };
+  }
+  if (isStalemate(state)) {
+    return { kind: "stalemate", winner: lastMover, loser: state.turn };
+  }
+
+  return null;
+}
+
 /** In check AND no legal moves. */
 export function isCheckmate(state: GameState): boolean {
+  if (!hasBothKings(state)) return false;
   if (!isInCheck(state, state.turn)) return false;
   return generateMoves(state).length === 0;
 }
 
 /** NOT in check AND no legal moves. */
 export function isStalemate(state: GameState): boolean {
+  if (!hasBothKings(state)) return false;
   if (isInCheck(state, state.turn)) return false;
   return generateMoves(state).length === 0;
 }

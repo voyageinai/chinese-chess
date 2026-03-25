@@ -21,14 +21,15 @@ Self-hosted Chinese chess (xiangqi) engine tournament platform. Next.js 16 full-
 ### Server-side systems (`src/server/`)
 
 - **UciEngine** (`uci.ts`) — Spawns engine subprocesses, handles UCI protocol. Auto-detects coordinate system: engines advertising `UCI_Variant` option (Fairy-Stockfish) use 1-based ranks (1-10), pure xiangqi engines (Pikafish) use 0-based (0-9). Translates internal FEN piece letters (`H`/`E`) to UCI standard (`N`/`B`) before sending via `fenToUci()`.
-- **Match** (`match.ts`) — Orchestrates a single engine-vs-engine game. Sends position as pure FEN each move (no move history accumulation). Validates moves, manages clocks, persists each move incrementally to DB. Stores eval from red's perspective (flips black engine eval). Emits events for live WebSocket streaming. Exports `adjudicateRepetition()` as a testable pure function for repetition/perpetual-check rulings.
-- **TournamentRunner** (`tournament.ts`) — Round-robin pairing, sequential match execution, Elo updates (K=32). Converts DB time (seconds) to UCI time (ms) at handoff. Persists `result_reason` alongside result for every game.
+- **Match** (`match.ts`) — Orchestrates a single engine-vs-engine game. Sends position as pure FEN each move (no move history accumulation). Validates moves, manages clocks, persists each move incrementally to DB. Stores eval from red's perspective (flips black engine eval). Emits events for live WebSocket streaming. Uses a fixed pipeline of board-terminal detection (`rules.ts`) then automatic adjudication (`judge.ts`).
+- **Judge** (`judge.ts`) — Fixed platform adjudicator for repeated positions, perpetual check, perpetual chase, and the hardcoded natural move limit. Exports `adjudicateRepetition()` as a pure testable function.
+- **TournamentRunner** (`tournament.ts`) — Round-robin pairing, sequential match execution, Elo updates (K=32). Converts DB time (seconds) to UCI time (ms) at handoff. Persists `result_code`, `result_reason`, and `result_detail` for every finished game.
 - **WsHub** (`ws.ts`) — WebSocket broadcast for live game events. Only intercepts `/ws` path; preserves other upgrades (Next.js HMR).
-- **Rules** (`rules.ts`) — Move generation, legality checking, check/checkmate/stalemate detection. `applyMove()` manages halfmove clock (resets on captures only — xiangqi differs from chess where pawn moves also reset).
+- **Rules** (`rules.ts`) — Move generation, legality checking, check/checkmate/stalemate detection, flying-general capture support, and immediate eat-king terminal classification. `applyMove()` manages halfmove clock (resets on captures only — xiangqi differs from chess where pawn moves also reset).
 
 ### End-of-game conditions (in `match.ts`)
 
-Checkmate, stalemate (loss for stalemated side per WXF rules, NOT draw), timeout, perpetual check (based on threefold position repetition where one side checked every move in the cycle — checking side loses), threefold repetition (draw if no perpetual check detected), 120-halfmove no-capture draw. Engine crashes, illegal moves, and invalid move formats also terminate with appropriate `result_reason`.
+King capture, checkmate, stalemate (loss for stalemated side per WXF rules, NOT draw), timeout, perpetual check, perpetual chase, repeated-position draw, hardcoded natural move limit draw, engine crashes, illegal moves, and invalid move formats. The platform uses one fixed automatic rule set; there is no configurable tournament-specific adjudication profile.
 
 ### Engine upload validation (`src/app/api/engines/route.ts`)
 
@@ -42,7 +43,7 @@ SQLite via `better-sqlite3` with WAL mode. Schema in `schema.ts`, queries in `qu
 
 ### Frontend (`src/app/`)
 
-Next.js App Router. Pages: home (leaderboard + recent games), tournaments (list + detail with crosstable), engines (upload/manage), games (replay with eval chart), guide, admin, auth (login/register with invite code). API routes under `src/app/api/`. Game result reasons are translated to Chinese via `translateReason()` in the game detail page.
+Next.js App Router. Pages: home (leaderboard + recent games), tournaments (list + detail with crosstable), engines (upload/manage), games (replay with eval chart), guide, admin, auth (login/register with invite code). API routes under `src/app/api/`. Game result text is translated from `result_code`/`result_detail` via `src/lib/results.ts`, with `result_reason` retained for export/debug.
 
 ### Key components (`src/components/`)
 
@@ -104,17 +105,17 @@ Conversion happens in `tournament.ts` (`* 1000`) when creating `MatchConfig`.
 
 Red = white in UCI (`wtime`/`winc`). FEN turn: `w` = red, `b` = black.
 
-### Repetition and perpetual check
+### Repetition and perpetual actions
 
-The unified repetition adjudicator in `match.ts` tracks per-ply metadata (`PlyMeta`: position key, mover, gaveCheck) and position occurrences. On threefold repetition, it analyzes the last cycle to determine if one side perpetually checked (that side loses) or if it's a plain draw. The `adjudicateRepetition()` function is exported and unit-tested independently. Perpetual chase (长捉) is NOT yet implemented.
+The fixed adjudicator in `judge.ts` tracks per-ply metadata (`PlyMeta`: position key, mover, moving piece kind, check flag, chase kind) and position occurrences. On the third occurrence of the same board+side-to-move key, it analyzes the last cycle and deterministically returns one of: perpetual-check loss, perpetual-chase loss, mutual perpetual-check draw, mutual perpetual-chase draw, or repeated-position draw.
 
 ### Stalemate
 
 In xiangqi, stalemate = stalemated side **loses** (unlike chess where it's a draw). WXF 2018 Article 3.1.A.II.
 
-### Result reason persistence
+### Result persistence
 
-Every game termination produces a `result_reason` string stored in the `games.result_reason` column. Frontend translates English reasons to Chinese via `REASON_ZH` mapping in the game detail page.
+Every game termination stores `result_code`, `result_reason`, and `result_detail` in the `games` table. Frontend translations should prefer `result_code`/`result_detail`; `result_reason` is the stable English export/debug string.
 
 ## Gotchas
 

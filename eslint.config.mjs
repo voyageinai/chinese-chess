@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Uploaded / bundled engine artifacts are executable payloads, not app source.
+    "data/engines/**",
+    "data/default-engines/**",
   ]),
 ]);
 

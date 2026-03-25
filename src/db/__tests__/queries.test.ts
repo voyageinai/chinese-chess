@@ -241,10 +241,11 @@ describe("Games", () => {
 
     // Finish game
     const movesJson = JSON.stringify([{ move: "h2e2", fen: "...", time_ms: 100, eval: null }]);
-    updateGameResult(game.id, "red", "Checkmate", movesJson, 50, 45);
+    updateGameResult(game.id, "red", "checkmate", "Checkmate", null, movesJson, 50, 45);
 
     const finished = getGameById(game.id)!;
     expect(finished.result).toBe("red");
+    expect(finished.result_code).toBe("checkmate");
     expect(finished.moves).toBe(movesJson);
     expect(finished.red_time_left).toBe(50);
     expect(finished.black_time_left).toBe(45);

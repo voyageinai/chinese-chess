@@ -7,6 +7,7 @@ import type {
   Tournament,
   TournamentEntry,
   Game,
+  ResultCode,
   AuditLog,
   InviteCode,
 } from "@/lib/types";
@@ -351,15 +352,17 @@ export function updateGameMoves(
 export function updateGameResult(
   id: string,
   result: "red" | "black" | "draw",
+  resultCode: ResultCode,
   reason: string,
+  detail: string | null,
   moves: string,
   redTimeLeft: number | null,
   blackTimeLeft: number | null,
 ): void {
   const db = getDb();
   db.prepare(
-    "UPDATE games SET result = ?, result_reason = ?, moves = ?, red_time_left = ?, black_time_left = ?, finished_at = unixepoch() WHERE id = ?",
-  ).run(result, reason, moves, redTimeLeft, blackTimeLeft, id);
+    "UPDATE games SET result = ?, result_code = ?, result_reason = ?, result_detail = ?, moves = ?, red_time_left = ?, black_time_left = ?, finished_at = unixepoch() WHERE id = ?",
+  ).run(result, resultCode, reason, detail, moves, redTimeLeft, blackTimeLeft, id);
 }
 
 export function updateGameStarted(id: string): void {

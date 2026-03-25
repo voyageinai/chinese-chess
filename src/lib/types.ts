@@ -39,6 +39,25 @@ export interface StoredMove {
   depth?: number | null; // search depth at time of move
 }
 
+export type ResultCode =
+  | "king_capture"
+  | "checkmate"
+  | "stalemate"
+  | "perpetual_check"
+  | "mutual_perpetual_check"
+  | "perpetual_chase"
+  | "mutual_perpetual_chase"
+  | "repetition"
+  | "natural_move_limit"
+  | "time_forfeit"
+  | "illegal_move"
+  | "invalid_move"
+  | "engine_crash"
+  | "engine_init_failed"
+  | "engine_no_response"
+  | "game_aborted"
+  | "internal_error";
+
 // -- API / DB types --
 export type UserStatus = "active" | "banned";
 
@@ -95,7 +114,9 @@ export interface Game {
   red_engine_id: string;
   black_engine_id: string;
   result: "red" | "black" | "draw" | null;
+  result_code: ResultCode | null;
   result_reason: string | null;
+  result_detail: string | null;
   moves: string; // JSON string of StoredMove[]
   red_time_left: number | null;
   black_time_left: number | null;
@@ -131,7 +152,14 @@ export type WsMessage =
       blackTime: number;
       startFen?: string;
     }
-  | { type: "game_end"; gameId: string; result: "red" | "black" | "draw"; reason: string }
+  | {
+      type: "game_end";
+      gameId: string;
+      result: "red" | "black" | "draw";
+      code: ResultCode;
+      reason: string;
+      detail: string | null;
+    }
   | { type: "tournament_end"; tournamentId: string }
   | {
       type: "engine_thinking";

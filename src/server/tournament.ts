@@ -3,9 +3,10 @@ import path from "path";
 import fs from "fs";
 import { Match, type MatchConfig, type MatchResult } from "./match";
 import { calculateElo } from "./elo";
+import { buildStaticVerdict } from "./judge";
 import * as queries from "@/db/queries";
 import { getTournaments } from "@/db/queries";
-import type { Engine, Game, Tournament, TournamentEntry } from "@/lib/types";
+import type { Engine, Game, Tournament } from "@/lib/types";
 import type { WsHub } from "./ws";
 import { createStrategy } from "./strategies";
 import type { RoundContext, Standing } from "./strategies";
@@ -209,9 +210,12 @@ export class TournamentRunner extends EventEmitter {
       result = await match.run();
     } catch (err) {
       console.error(`[tournament] Match ${gameId} threw:`, err);
+      const verdict = buildStaticVerdict("draw", "internal_error");
       result = {
-        result: "draw",
-        reason: "Internal error",
+        result: verdict.result,
+        code: verdict.code,
+        reason: verdict.reason,
+        detail: verdict.detail,
         moves: [],
         redTimeLeft: 0,
         blackTimeLeft: 0,
@@ -222,7 +226,9 @@ export class TournamentRunner extends EventEmitter {
     queries.updateGameResult(
       gameId,
       result.result,
+      result.code,
       result.reason,
+      result.detail,
       JSON.stringify(result.moves),
       result.redTimeLeft,
       result.blackTimeLeft,
@@ -316,7 +322,9 @@ export class TournamentRunner extends EventEmitter {
       type: "game_end",
       gameId,
       result: result.result,
+      code: result.code,
       reason: result.reason,
+      detail: result.detail,
     });
   }
 

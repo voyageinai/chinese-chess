@@ -3,75 +3,26 @@ import { parseFen, serializeFen } from "@/lib/fen";
 import {
   generateMoves,
   applyMove,
-  isCheckmate,
-  isStalemate,
+  classifyBoardTerminal,
   isInCheck,
   isLegalMove,
 } from "./rules";
-import { INITIAL_FEN, uciToSquare, squareToUci } from "@/lib/constants";
+import {
+  adjudicateRepetition,
+  buildForfeitVerdict,
+  buildStaticVerdict,
+  classifyChase,
+  judgeNaturalMoveLimit,
+  positionKey,
+  type JudgeVerdict,
+  type PlyMeta,
+} from "./judge";
+import { formatResultReason, stringifyResultDetail } from "@/lib/results";
+import { INITIAL_FEN, squareToUci } from "@/lib/constants";
 import { updateGameMoves } from "@/db/queries";
-import type { Color, StoredMove, GameState, Move } from "@/lib/types";
+import type { StoredMove, ResultCode } from "@/lib/types";
 import { EventEmitter } from "events";
-
-// Exported for testing
-export interface PlyMeta {
-  key: string;
-  mover: Color;
-  gaveCheck: boolean;
-}
-
-export type RepetitionVerdict =
-  | { result: "red" | "black"; reason: string }
-  | { result: "draw"; reason: string }
-  | null; // no repetition yet
-
-/**
- * Analyze whether a threefold position repetition constitutes perpetual check.
- * Returns a verdict if the position has occurred 3+ times, null otherwise.
- */
-export function adjudicateRepetition(
-  occurrences: number[],
-  plyHistory: PlyMeta[],
-): RepetitionVerdict {
-  if (occurrences.length < 3) return null;
-
-  // Analyze the last cycle (between 2nd-to-last and last occurrence)
-  const cycleStart = occurrences[occurrences.length - 2];
-  const cycleEnd = occurrences[occurrences.length - 1];
-
-  let redCheckedEveryMove = true;
-  let blackCheckedEveryMove = true;
-  let redMoveCount = 0;
-  let blackMoveCount = 0;
-
-  for (let p = cycleStart + 1; p <= cycleEnd; p++) {
-    const meta = plyHistory[p - 1]; // plyHistory[0] = ply 1
-    if (meta.mover === "red") {
-      redMoveCount++;
-      if (!meta.gaveCheck) redCheckedEveryMove = false;
-    } else {
-      blackMoveCount++;
-      if (!meta.gaveCheck) blackCheckedEveryMove = false;
-    }
-  }
-
-  const redPerpetual = redCheckedEveryMove && redMoveCount > 0;
-  const blackPerpetual = blackCheckedEveryMove && blackMoveCount > 0;
-
-  if (redPerpetual && !blackPerpetual) {
-    return { result: "black", reason: "Red lost by perpetual check" };
-  }
-  if (blackPerpetual && !redPerpetual) {
-    return { result: "red", reason: "Black lost by perpetual check" };
-  }
-  return {
-    result: "draw",
-    reason:
-      redPerpetual && blackPerpetual
-        ? "Mutual perpetual check"
-        : "Threefold repetition",
-  };
-}
+export { adjudicateRepetition, type JudgeVerdict, type PlyMeta } from "./judge";
 
 export interface MatchConfig {
   redEnginePath: string;
@@ -84,7 +35,9 @@ export interface MatchConfig {
 
 export interface MatchResult {
   result: "red" | "black" | "draw";
+  code: ResultCode;
   reason: string;
+  detail: string | null;
   moves: StoredMove[];
   redTimeLeft: number;
   blackTimeLeft: number;
@@ -114,13 +67,6 @@ export class Match extends EventEmitter {
     const plyHistory: PlyMeta[] = [];
     const occurrencesByKey = new Map<string, number[]>();
 
-    const positionKey = (state: GameState): string => {
-      const fen = serializeFen(state);
-      // Use board layout + turn (first two FEN fields) as the key
-      const parts = fen.split(" ");
-      return parts[0] + " " + parts[1];
-    };
-
     // Record initial position as ply 0
     const initKey = positionKey(gameState);
     occurrencesByKey.set(initKey, [0]);
@@ -133,25 +79,23 @@ export class Match extends EventEmitter {
       try {
         await this.redEngine.init();
       } catch {
-        return {
-          result: "black",
-          reason: "Red engine failed to initialize",
-          moves: storedMoves,
-          redTimeLeft: redTime,
-          blackTimeLeft: blackTime,
-        };
+        return this.buildResultFromVerdict(
+          buildForfeitVerdict("red", "engine_init_failed"),
+          storedMoves,
+          redTime,
+          blackTime,
+        );
       }
 
       try {
         await this.blackEngine.init();
       } catch {
-        return {
-          result: "red",
-          reason: "Black engine failed to initialize",
-          moves: storedMoves,
-          redTimeLeft: redTime,
-          blackTimeLeft: blackTime,
-        };
+        return this.buildResultFromVerdict(
+          buildForfeitVerdict("black", "engine_init_failed"),
+          storedMoves,
+          redTime,
+          blackTime,
+        );
       }
 
       // Listen for engine crashes
@@ -197,9 +141,8 @@ export class Match extends EventEmitter {
           (currentTurn === "red" && redCrashed) ||
           (currentTurn === "black" && blackCrashed)
         ) {
-          return this.buildResult(
-            currentTurn === "red" ? "black" : "red",
-            `${currentTurn} engine crashed`,
+          return this.buildResultFromVerdict(
+            buildForfeitVerdict(currentTurn, "engine_crash"),
             storedMoves,
             redTime,
             blackTime,
@@ -226,9 +169,8 @@ export class Match extends EventEmitter {
           goResult = await engine.go(posCmd, goOptions);
         } catch {
           // Engine timed out or errored on go command
-          return this.buildResult(
-            currentTurn === "red" ? "black" : "red",
-            `${currentTurn} engine failed to respond`,
+          return this.buildResultFromVerdict(
+            buildForfeitVerdict(currentTurn, "engine_no_response"),
             storedMoves,
             redTime,
             blackTime,
@@ -246,18 +188,16 @@ export class Match extends EventEmitter {
 
         // Check for timeout (flag fall)
         if (currentTurn === "red" && redTime <= 0) {
-          return this.buildResult(
-            "black",
-            "Red lost on time",
+          return this.buildResultFromVerdict(
+            buildForfeitVerdict("red", "time_forfeit"),
             storedMoves,
             0,
             blackTime,
           );
         }
         if (currentTurn === "black" && blackTime <= 0) {
-          return this.buildResult(
-            "red",
-            "Black lost on time",
+          return this.buildResultFromVerdict(
+            buildForfeitVerdict("black", "time_forfeit"),
             storedMoves,
             redTime,
             0,
@@ -267,10 +207,13 @@ export class Match extends EventEmitter {
         const uciMove = goResult.bestmove;
 
         // Validate move format (4 chars for 0-based "h2e2", 4-6 for 1-based "h3e3" or "a10b10")
-        if (!uciMove || uciMove.length < 4 || !/^[a-i]\d{1,2}[a-i]\d{1,2}$/.test(uciMove)) {
-          return this.buildResult(
-            currentTurn === "red" ? "black" : "red",
-            `${currentTurn} engine returned invalid move: ${uciMove}`,
+        if (
+          !uciMove ||
+          uciMove.length < 4 ||
+          !/^[a-i]\d{1,2}[a-i]\d{1,2}$/.test(uciMove)
+        ) {
+          return this.buildResultFromVerdict(
+            buildForfeitVerdict(currentTurn, "invalid_move", { move: uciMove ?? null }),
             storedMoves,
             redTime,
             blackTime,
@@ -282,9 +225,8 @@ export class Match extends EventEmitter {
 
         // Validate move legality
         if (!isLegalMove(gameState, fromSq, toSq)) {
-          return this.buildResult(
-            currentTurn === "red" ? "black" : "red",
-            `${currentTurn} engine made illegal move: ${uciMove}`,
+          return this.buildResultFromVerdict(
+            buildForfeitVerdict(currentTurn, "illegal_move", { move: uciMove }),
             storedMoves,
             redTime,
             blackTime,
@@ -303,6 +245,7 @@ export class Match extends EventEmitter {
         const moveObj = legalMoves.find(
           (m) => m.from === fromSq && m.to === toSq,
         )!;
+        const movingPiece = gameState.board[fromSq]!;
 
         // Apply the move
         gameState = applyMove(gameState, moveObj);
@@ -348,26 +291,15 @@ export class Match extends EventEmitter {
           movedAt: Date.now(),
         });
 
-        // --- Check termination conditions ---
-
-        // Checkmate: the side to move (after applyMove) is checkmated
-        if (isCheckmate(gameState)) {
-          // currentTurn made the move that checkmated the opponent
+        // --- Board-level termination (eat-king / checkmate / stalemate) ---
+        const boardTerminal = classifyBoardTerminal(gameState, currentTurn);
+        if (boardTerminal) {
           return this.buildResult(
-            currentTurn,
-            "Checkmate",
-            storedMoves,
-            redTime,
-            blackTime,
-          );
-        }
-
-        // Stalemate: the side to move has no legal moves but is not in check
-        // In xiangqi, stalemate = stalemated side loses (WXF 2018 Article 3.1.A.II)
-        if (isStalemate(gameState)) {
-          return this.buildResult(
-            currentTurn,
-            "Stalemate",
+            boardTerminal.winner,
+            boardTerminal.kind,
+            boardTerminal.kind === "king_capture"
+              ? { side: boardTerminal.loser }
+              : null,
             storedMoves,
             redTime,
             blackTime,
@@ -378,9 +310,17 @@ export class Match extends EventEmitter {
         const key = positionKey(gameState);
         const opponentColor = gameState.turn; // side to move next
         const gaveCheck = isInCheck(gameState, opponentColor);
+        const chaseKind = classifyChase(gameState, currentTurn, moveObj);
 
         const plyIndex = storedMoves.length; // 1-based ply (ply 0 = initial position)
-        plyHistory.push({ key, mover: currentTurn, gaveCheck });
+        plyHistory.push({
+          key,
+          mover: currentTurn,
+          move: canonicalMove,
+          movingPieceKind: movingPiece.kind,
+          gaveCheck,
+          chaseKind,
+        });
 
         if (!occurrencesByKey.has(key)) {
           occurrencesByKey.set(key, []);
@@ -390,20 +330,18 @@ export class Match extends EventEmitter {
 
         const verdict = adjudicateRepetition(occurrences, plyHistory);
         if (verdict) {
-          return this.buildResult(
-            verdict.result,
-            verdict.reason,
+          return this.buildResultFromVerdict(
+            verdict,
             storedMoves,
             redTime,
             blackTime,
           );
         }
 
-        // 120 halfmove draw rule (no captures for 120 half-moves)
-        if (gameState.halfmoveClock >= 120) {
-          return this.buildResult(
-            "draw",
-            "120-move rule",
+        const naturalMoveVerdict = judgeNaturalMoveLimit(gameState);
+        if (naturalMoveVerdict) {
+          return this.buildResultFromVerdict(
+            naturalMoveVerdict,
             storedMoves,
             redTime,
             blackTime,
@@ -412,9 +350,8 @@ export class Match extends EventEmitter {
       }
 
       // If aborted
-      return this.buildResult(
-        "draw",
-        "Game aborted",
+      return this.buildResultFromVerdict(
+        buildStaticVerdict("draw", "game_aborted"),
         storedMoves,
         redTime,
         blackTime,
@@ -428,14 +365,40 @@ export class Match extends EventEmitter {
     this.aborted = true;
   }
 
-  private buildResult(
-    result: "red" | "black" | "draw",
-    reason: string,
+  private buildResultFromVerdict(
+    verdict: JudgeVerdict,
     moves: StoredMove[],
     redTimeLeft: number,
     blackTimeLeft: number,
   ): MatchResult {
-    return { result, reason, moves, redTimeLeft, blackTimeLeft };
+    return {
+      result: verdict.result,
+      code: verdict.code,
+      reason: verdict.reason,
+      detail: verdict.detail,
+      moves,
+      redTimeLeft,
+      blackTimeLeft,
+    };
+  }
+
+  private buildResult(
+    result: "red" | "black" | "draw",
+    code: ResultCode,
+    detail: Record<string, string | number | boolean | null> | null,
+    moves: StoredMove[],
+    redTimeLeft: number,
+    blackTimeLeft: number,
+  ): MatchResult {
+    return {
+      result,
+      code,
+      reason: formatResultReason(code, detail ?? undefined),
+      detail: stringifyResultDetail(detail),
+      moves,
+      redTimeLeft,
+      blackTimeLeft,
+    };
   }
 
   private cleanup(): void {

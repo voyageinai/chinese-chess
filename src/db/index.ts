@@ -108,6 +108,12 @@ function runMigrations(database: Database.Database): void {
   if (!hasColumn(database, "games", "result_reason")) {
     database.exec("ALTER TABLE games ADD COLUMN result_reason TEXT");
   }
+  if (!hasColumn(database, "games", "result_code")) {
+    database.exec("ALTER TABLE games ADD COLUMN result_code TEXT");
+  }
+  if (!hasColumn(database, "games", "result_detail")) {
+    database.exec("ALTER TABLE games ADD COLUMN result_detail TEXT");
+  }
 
   // -- v4: Add win/loss/draw counters to engines --
   if (!hasColumn(database, "engines", "wins")) {

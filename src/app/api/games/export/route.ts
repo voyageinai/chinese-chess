@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
         red: g.red_engine_name,
         black: g.black_engine_name,
         result: g.result,
+        result_code: g.result_code,
         result_reason: g.result_reason,
+        result_detail: g.result_detail,
         opening_fen: g.opening_fen,
         moves: JSON.parse(g.moves || "[]"),
         finished_at: g.finished_at,
@@ -40,7 +42,9 @@ export async function GET(request: NextRequest) {
       lines.push(`[Red "${g.red_engine_name}"]`);
       lines.push(`[Black "${g.black_engine_name}"]`);
       lines.push(`[Result "${g.result === "red" ? "1-0" : g.result === "black" ? "0-1" : "1/2-1/2"}"]`);
+      if (g.result_code) lines.push(`[TerminationCode "${g.result_code}"]`);
       if (g.result_reason) lines.push(`[Termination "${g.result_reason}"]`);
+      if (g.result_detail) lines.push(`[TerminationDetail "${g.result_detail.replaceAll('"', '\\"')}"]`);
       if (g.opening_fen) lines.push(`[FEN "${g.opening_fen}"]`);
       lines.push("");
       const moves = JSON.parse(g.moves || "[]") as { move: string }[];

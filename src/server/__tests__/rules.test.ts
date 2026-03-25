@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   generateMoves,
-  isLegalMove,
   isInCheck,
   isCheckmate,
-  isStalemate,
   applyMove,
+  classifyBoardTerminal,
 } from "../rules";
 import { parseFen } from "@/lib/fen";
 import { INITIAL_FEN, uciToSquare } from "@/lib/constants";
@@ -64,6 +63,16 @@ describe("generateMoves", () => {
       expect(Math.floor(m.to / 9)).toBeGreaterThanOrEqual(5);
     }
   });
+
+  it("allows flying general capture", () => {
+    const state = parseFen("4k4/9/9/9/9/9/9/9/9/4K4 w - - 0 1");
+    const moves = generateMoves(state);
+    const kingSq = uciToSquare("e0");
+    const kingMoves = moves.filter((m) => m.from === kingSq);
+    expect(
+      kingMoves.some((m) => m.to === uciToSquare("e9")),
+    ).toBe(true);
+  });
 });
 
 describe("isInCheck", () => {
@@ -107,5 +116,23 @@ describe("applyMove", () => {
     expect(newState.board[to]).toEqual({ color: "red", kind: "c" });
     expect(newState.board[from]).toBeNull();
     expect(newState.turn).toBe("black");
+  });
+
+  it("classifies king capture as immediate terminal", () => {
+    const state = parseFen("r3k4/4R4/9/9/9/9/9/9/9/4K4 w - - 0 1");
+    const move = generateMoves(state).find(
+      (candidate) =>
+        candidate.from === uciToSquare("e8") &&
+        candidate.to === uciToSquare("e9"),
+    );
+    expect(move).toBeDefined();
+
+    const nextState = applyMove(state, move!);
+    expect(generateMoves(nextState)).toHaveLength(0);
+    expect(classifyBoardTerminal(nextState, "red")).toEqual({
+      kind: "king_capture",
+      winner: "red",
+      loser: "black",
+    });
   });
 });
