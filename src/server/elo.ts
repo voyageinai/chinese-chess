@@ -1,23 +1,43 @@
-const K = 32;
+/**
+ * Stepped K factor based on games played (FIDE-inspired).
+ *   < 20 games: K=64 (provisional — fast calibration)
+ *  20–49 games: K=32 (settling)
+ *    ≥ 50 games: K=16 (established — stable rating)
+ */
+export function getK(gamesPlayed: number): number {
+  if (gamesPlayed < 20) return 64;
+  if (gamesPlayed < 50) return 32;
+  return 16;
+}
 
 /**
  * Calculate new Elo ratings after a game.
+ * Each side uses its own K factor based on games played,
+ * so a new engine adjusts faster while an established engine stays stable.
+ *
  * @param ratingA - Player A's current rating
  * @param ratingB - Player B's current rating
  * @param scoreA - Player A's score: 1 (win), 0.5 (draw), 0 (loss)
+ * @param gamesA - Player A's total games played (before this game)
+ * @param gamesB - Player B's total games played (before this game)
  * @returns [newRatingA, newRatingB]
  */
 export function calculateElo(
   ratingA: number,
   ratingB: number,
-  scoreA: number
+  scoreA: number,
+  gamesA: number = 30,
+  gamesB: number = 30,
 ): [number, number] {
   const expectedA = 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
   const expectedB = 1 - expectedA;
   const scoreB = 1 - scoreA;
 
-  const newA = ratingA + K * (scoreA - expectedA);
-  const newB = ratingB + K * (scoreB - expectedB);
+  const kA = getK(gamesA);
+  const kB = getK(gamesB);
+
+  const newA = ratingA + kA * (scoreA - expectedA);
+  const newB = ratingB + kB * (scoreB - expectedB);
 
   return [newA, newB];
 }

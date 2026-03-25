@@ -1,31 +1,72 @@
 import { describe, it, expect } from "vitest";
-import { calculateElo, calculateEloCI } from "../elo";
+import { calculateElo, calculateEloCI, getK } from "../elo";
 
-describe("calculateElo", () => {
-  it("winner gains, loser loses equal amounts", () => {
-    const [newA, newB] = calculateElo(1500, 1500, 1);
-    expect(newA).toBeGreaterThan(1500);
-    expect(newB).toBeLessThan(1500);
-    expect(Math.round(newA)).toBe(1516);
-    expect(Math.round(newB)).toBe(1484);
+describe("getK", () => {
+  it("returns 64 for new engines (< 20 games)", () => {
+    expect(getK(0)).toBe(64);
+    expect(getK(10)).toBe(64);
+    expect(getK(19)).toBe(64);
   });
 
-  it("draw between equal players changes nothing", () => {
-    const [newA, newB] = calculateElo(1500, 1500, 0.5);
+  it("returns 32 for settling engines (20–49 games)", () => {
+    expect(getK(20)).toBe(32);
+    expect(getK(35)).toBe(32);
+    expect(getK(49)).toBe(32);
+  });
+
+  it("returns 16 for established engines (≥ 50 games)", () => {
+    expect(getK(50)).toBe(16);
+    expect(getK(100)).toBe(16);
+  });
+});
+
+describe("calculateElo", () => {
+  it("new engines (K=64): winner gains +32 vs equal opponent", () => {
+    const [newA, newB] = calculateElo(1500, 1500, 1, 0, 0);
+    expect(Math.round(newA)).toBe(1532);
+    expect(Math.round(newB)).toBe(1468);
+  });
+
+  it("established engines (K=16): winner gains +8 vs equal opponent", () => {
+    const [newA, newB] = calculateElo(1500, 1500, 1, 60, 60);
+    expect(Math.round(newA)).toBe(1508);
+    expect(Math.round(newB)).toBe(1492);
+  });
+
+  it("asymmetric K: new engine adjusts more than established engine", () => {
+    // New engine (K=64) beats established engine (K=16)
+    const [newA, newB] = calculateElo(1500, 1500, 1, 5, 60);
+    const gainA = newA - 1500;
+    const lossB = 1500 - newB;
+    // New engine gains 32, established loses only 8
+    expect(Math.round(gainA)).toBe(32);
+    expect(Math.round(lossB)).toBe(8);
+  });
+
+  it("draw between equal players changes nothing regardless of K", () => {
+    const [newA, newB] = calculateElo(1500, 1500, 0.5, 0, 0);
     expect(newA).toBe(1500);
     expect(newB).toBe(1500);
   });
 
   it("upset win gives larger rating change", () => {
-    const [newA, newB] = calculateElo(1200, 1800, 1);
+    const [newA] = calculateElo(1200, 1800, 1, 5, 5);
     const gain = newA - 1200;
-    expect(gain).toBeGreaterThan(20);
+    // K=64, expected ~0.03, gain ≈ 64*0.97 ≈ 62
+    expect(gain).toBeGreaterThan(50);
   });
 
   it("expected win gives smaller rating change", () => {
-    const [newA, newB] = calculateElo(1800, 1200, 1);
+    const [newA] = calculateElo(1800, 1200, 1, 5, 5);
     const gain = newA - 1800;
+    // K=64, expected ~0.97, gain ≈ 64*0.03 ≈ 2
     expect(gain).toBeLessThan(10);
+  });
+
+  it("defaults to K=32 when games not specified", () => {
+    const [newA, newB] = calculateElo(1500, 1500, 1);
+    expect(Math.round(newA)).toBe(1516);
+    expect(Math.round(newB)).toBe(1484);
   });
 });
 

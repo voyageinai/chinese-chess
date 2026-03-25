@@ -79,8 +79,8 @@ export default function TournamentsPage() {
   // Create form state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formName, setFormName] = useState("");
-  const [formTimeBase, setFormTimeBase] = useState("300");
-  const [formTimeInc, setFormTimeInc] = useState("3");
+  const [formTimeBase, setFormTimeBase] = useState("60");
+  const [formTimeInc, setFormTimeInc] = useState("1");
   const [formRounds, setFormRounds] = useState("1");
   const [formFormat, setFormFormat] = useState("round_robin");
   const [formError, setFormError] = useState("");

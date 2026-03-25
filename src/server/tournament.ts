@@ -248,6 +248,8 @@ export class TournamentRunner extends EventEmitter {
         redEngineData.elo,
         blackEngineData.elo,
         scoreA,
+        redEngineData.games_played,
+        blackEngineData.games_played,
       );
 
       // Update engine Elo and W/L/D in DB and local cache
