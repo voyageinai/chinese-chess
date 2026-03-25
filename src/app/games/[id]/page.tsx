@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   SkipForward,
+  Play,
+  Pause,
 } from "lucide-react";
 import { INITIAL_FEN } from "@/lib/constants";
 import { analyzeMoveDisplay, extractPvHeadMove } from "@/lib/move-display";
@@ -41,6 +43,8 @@ export default function GamePage({
   const [moves, setMoves] = useState<StoredMove[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [isAutoplaying, setIsAutoplaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<1 | 2>(1);
   // --- Clock state: refs are the source of truth, state is for rendering ---
   const clockRef = useRef({ red: 0, black: 0 });
   const movesRef = useRef<StoredMove[]>([]);
@@ -63,6 +67,7 @@ export default function GamePage({
   const resyncPromiseRef = useRef<Promise<void> | null>(null);
   /** Timestamp of the last WS message for this game — used by polling fallback */
   const lastWsMessageRef = useRef<number>(Date.now());
+  const autoplayTimerRef = useRef<number | null>(null);
 
   /** Update clock refs and sync to React state for display */
   function setClock(red: number, black: number) {
@@ -366,17 +371,25 @@ export default function GamePage({
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "ArrowLeft") {
         e.preventDefault();
+        setIsAutoplaying(false);
+        setPreviewIndex(null);
         setCurrentIndex((prev) => Math.max(-1, prev - 1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
+        setIsAutoplaying(false);
+        setPreviewIndex(null);
         setCurrentIndex((prev) =>
           Math.min(moves.length - 1, prev + 1),
         );
       } else if (e.key === "Home") {
         e.preventDefault();
+        setIsAutoplaying(false);
+        setPreviewIndex(null);
         setCurrentIndex(-1);
       } else if (e.key === "End") {
         e.preventDefault();
+        setIsAutoplaying(false);
+        setPreviewIndex(null);
         setCurrentIndex(moves.length - 1);
       }
     }
@@ -387,11 +400,57 @@ export default function GamePage({
 
   const navigate = useCallback(
     (idx: number) => {
+      setIsAutoplaying(false);
       setPreviewIndex(null);
       setCurrentIndex(Math.max(-1, Math.min(moves.length - 1, idx)));
     },
     [moves.length],
   );
+  const canAutoplay = Boolean(game?.result) && moves.length > 0;
+
+  const toggleAutoplay = useCallback(() => {
+    if (!canAutoplay) return;
+    setPreviewIndex(null);
+    setIsAutoplaying((prev) => {
+      if (prev) return false;
+      if (currentIndex >= moves.length - 1) {
+        setCurrentIndex(-1);
+      }
+      return true;
+    });
+  }, [canAutoplay, currentIndex, moves.length]);
+
+  useEffect(() => {
+    if (!canAutoplay && isAutoplaying) {
+      setIsAutoplaying(false);
+    }
+  }, [canAutoplay, isAutoplaying]);
+
+  useEffect(() => {
+    if (!isAutoplaying || !canAutoplay || previewIndex != null) {
+      if (autoplayTimerRef.current != null) {
+        window.clearTimeout(autoplayTimerRef.current);
+        autoplayTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (currentIndex >= moves.length - 1) {
+      setIsAutoplaying(false);
+      return;
+    }
+
+    autoplayTimerRef.current = window.setTimeout(() => {
+      setCurrentIndex((prev) => Math.min(moves.length - 1, prev + 1));
+    }, Math.round(850 / playbackSpeed));
+
+    return () => {
+      if (autoplayTimerRef.current != null) {
+        window.clearTimeout(autoplayTimerRef.current);
+        autoplayTimerRef.current = null;
+      }
+    };
+  }, [canAutoplay, currentIndex, isAutoplaying, moves.length, playbackSpeed, previewIndex]);
 
   const baseFen = game?.opening_fen || INITIAL_FEN;
   const displayIndex = previewIndex ?? currentIndex;
@@ -593,7 +652,10 @@ export default function GamePage({
           currentIndex={currentIndex}
           previewIndex={previewIndex}
           onSelect={navigate}
-          onPreview={(index) => setPreviewIndex(index === currentIndex ? null : index)}
+          onPreview={(index) => {
+            setIsAutoplaying(false);
+            setPreviewIndex(index === currentIndex ? null : index);
+          }}
           onPreviewEnd={() => setPreviewIndex(null)}
           blackMovesFirst={game?.opening_fen?.split(" ")[1] === "b"}
         />
@@ -602,7 +664,41 @@ export default function GamePage({
         <EvalChart moves={moves} currentIndex={currentIndex} />
 
         {/* Replay controls */}
-        <div className="flex justify-center gap-2 sticky bottom-0 z-10 bg-paper-100/90 backdrop-blur-sm py-3 -mx-1 px-1 md:static md:bg-transparent md:backdrop-blur-none md:py-0 md:mx-0 md:px-0">
+        <div className="flex flex-wrap justify-center gap-2 sticky bottom-0 z-10 bg-paper-100/90 backdrop-blur-sm py-3 -mx-1 px-1 md:static md:bg-transparent md:backdrop-blur-none md:py-0 md:mx-0 md:px-0">
+          {game.result && (
+            <>
+              <Button
+                variant={isAutoplaying ? "secondary" : "outline"}
+                size="sm"
+                onClick={toggleAutoplay}
+                disabled={!canAutoplay}
+                className="px-3"
+              >
+                {isAutoplaying ? (
+                  <Pause className="w-3.5 h-3.5" />
+                ) : (
+                  <Play className="w-3.5 h-3.5" />
+                )}
+                {isAutoplaying ? "暂停" : "播放"}
+              </Button>
+              <Button
+                variant={playbackSpeed === 1 ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => setPlaybackSpeed(1)}
+                disabled={!canAutoplay}
+              >
+                1x
+              </Button>
+              <Button
+                variant={playbackSpeed === 2 ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => setPlaybackSpeed(2)}
+                disabled={!canAutoplay}
+              >
+                2x
+              </Button>
+            </>
+          )}
           <Button
             variant="outline"
             size="icon-sm"
