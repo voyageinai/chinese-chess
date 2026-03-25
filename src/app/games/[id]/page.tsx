@@ -6,6 +6,13 @@ import { MoveList } from "@/components/MoveList";
 import { EvalChart } from "@/components/EvalChart";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   SkipBack,
   ChevronLeft,
   ChevronRight,
@@ -17,6 +24,10 @@ import { INITIAL_FEN } from "@/lib/constants";
 import { analyzeMoveDisplay, extractPvHeadMove } from "@/lib/move-display";
 import { translateResult } from "@/lib/results";
 import type { StoredMove, Game, Engine } from "@/lib/types";
+
+const AUTOPLAY_BASE_DELAY_MS = 1700;
+const PLAYBACK_SPEED_OPTIONS = ["0.5", "1", "2"] as const;
+type PlaybackSpeed = (typeof PLAYBACK_SPEED_OPTIONS)[number];
 
 /** Which side moves at a given ply, accounting for opening_fen turn. */
 function sideAtPly(ply: number, openingFen?: string | null): "red" | "black" {
@@ -44,7 +55,7 @@ export default function GamePage({
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [isAutoplaying, setIsAutoplaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<1 | 2>(1);
+  const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>("1");
   // --- Clock state: refs are the source of truth, state is for rendering ---
   const clockRef = useRef({ red: 0, black: 0 });
   const movesRef = useRef<StoredMove[]>([]);
@@ -442,7 +453,7 @@ export default function GamePage({
 
     autoplayTimerRef.current = window.setTimeout(() => {
       setCurrentIndex((prev) => Math.min(moves.length - 1, prev + 1));
-    }, Math.round(850 / playbackSpeed));
+    }, Math.round(AUTOPLAY_BASE_DELAY_MS / Number(playbackSpeed)));
 
     return () => {
       if (autoplayTimerRef.current != null) {
@@ -681,22 +692,22 @@ export default function GamePage({
                 )}
                 {isAutoplaying ? "暂停" : "播放"}
               </Button>
-              <Button
-                variant={playbackSpeed === 1 ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => setPlaybackSpeed(1)}
+              <Select
+                value={playbackSpeed}
+                onValueChange={(value) => setPlaybackSpeed((value as PlaybackSpeed) || "1")}
                 disabled={!canAutoplay}
               >
-                1x
-              </Button>
-              <Button
-                variant={playbackSpeed === 2 ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => setPlaybackSpeed(2)}
-                disabled={!canAutoplay}
-              >
-                2x
-              </Button>
+                <SelectTrigger size="sm" className="min-w-24 bg-background/80">
+                  <SelectValue placeholder="速度" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLAYBACK_SPEED_OPTIONS.map((speed) => (
+                    <SelectItem key={speed} value={speed}>
+                      {speed}x
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </>
           )}
           <Button
