@@ -48,12 +48,20 @@ export async function POST(request: Request) {
 }
 
 async function handleMatchmaking(
-  body: { engineId: string; gameCount?: number; timeBase?: number; timeInc?: number; label?: string },
+  body: {
+    engineId: string;
+    gameCount?: number;
+    timeBase?: number;
+    timeInc?: number;
+    label?: string;
+    opponentIds?: string[];
+  },
   user: { id: string; role: string },
 ) {
   const { engineId, gameCount = 1, label } = body;
   const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : 60;
   const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : 1;
+  const isGauntlet = label === "定级赛" && Array.isArray(body.opponentIds) && body.opponentIds.length > 0;
 
   // Validate engine belongs to user
   const engine = getEngineById(engineId);
@@ -67,13 +75,38 @@ async function handleMatchmaking(
     return NextResponse.json({ error: "引擎已被禁用" }, { status: 403 });
   }
 
-  // Get all visible engines for matchmaking pool
-  const allEngines = getVisibleEngines();
+  let opponents: string[];
 
-  // Select opponents (weighted random, no repeats, exclude same user)
-  const opponents = selectOpponents(engineId, engine.elo, user.id, gameCount, allEngines);
-  if (opponents.length === 0) {
-    return NextResponse.json({ error: "暂无可匹配的对手，请等待其他用户上传引擎" }, { status: 400 });
+  if (isGauntlet) {
+    // ── Gauntlet mode: user-selected opponents ──
+    const opponentIds = body.opponentIds!;
+    if (opponentIds.length > 10) {
+      return NextResponse.json({ error: "最多选择 10 个对手" }, { status: 400 });
+    }
+    // Validate each opponent
+    for (const oppId of opponentIds) {
+      if (oppId === engineId) {
+        return NextResponse.json({ error: "不能选择自己的引擎作为对手" }, { status: 400 });
+      }
+      const opp = getEngineById(oppId);
+      if (!opp) {
+        return NextResponse.json({ error: `对手引擎不存在: ${oppId}` }, { status: 404 });
+      }
+      if (opp.status === "disabled") {
+        return NextResponse.json({ error: `引擎 ${opp.name} 已被禁用` }, { status: 403 });
+      }
+      if (opp.visibility !== "public" && opp.user_id !== user.id && user.role !== "admin") {
+        return NextResponse.json({ error: `引擎 ${opp.name} 不可用` }, { status: 403 });
+      }
+    }
+    opponents = opponentIds;
+  } else {
+    // ── Ranked mode: auto-match opponents ──
+    const allEngines = getVisibleEngines();
+    opponents = selectOpponents(engineId, engine.elo, user.id, gameCount, allEngines);
+    if (opponents.length === 0) {
+      return NextResponse.json({ error: "暂无可匹配的对手，请等待其他用户上传引擎" }, { status: 400 });
+    }
   }
 
   // Load opening book
@@ -86,7 +119,7 @@ async function handleMatchmaking(
     ? `${engine.name} vs ${oppNames[0]}`
     : `${engine.name} ${tag} (${opponents.length} 局)`;
 
-  // Create tournament
+  // Create tournament — gauntlet gets correct format
   const tournament = createTournament(
     user.id,
     name,
@@ -94,7 +127,7 @@ async function handleMatchmaking(
     resolvedTimeInc,
     1,
     "quick_match",
-    "round_robin",
+    isGauntlet ? "gauntlet" : "round_robin",
   );
 
   // Add all engines
@@ -123,7 +156,7 @@ async function handleMatchmaking(
   runner.run().catch((err) => console.error("Quick match error:", err));
 
   logAudit("quick_match.start", user.id, "tournament", tournament.id, {
-    mode: "matchmaking",
+    mode: isGauntlet ? "gauntlet" : "matchmaking",
     game_count: opponents.length,
   });
 
@@ -131,7 +164,9 @@ async function handleMatchmaking(
     {
       tournament,
       gameId: gameIds.length === 1 ? gameIds[0] : undefined,
-      message: opponents.length === 1 ? "对弈已开始" : "排位赛已开始",
+      message: isGauntlet
+        ? opponents.length === 1 ? "定级赛已开始" : `定级赛已开始 (${opponents.length} 局)`
+        : opponents.length === 1 ? "对弈已开始" : "排位赛已开始",
     },
     { status: 201 },
   );

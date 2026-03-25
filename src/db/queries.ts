@@ -150,7 +150,7 @@ export function getLeaderboard(): (Engine & { owner: string })[] {
   const db = getDb();
   return db
     .prepare(
-      "SELECT e.*, u.username as owner FROM engines e JOIN users u ON e.user_id = u.id ORDER BY e.elo DESC",
+      "SELECT e.*, u.username as owner FROM engines e JOIN users u ON e.user_id = u.id WHERE e.status = 'active' ORDER BY e.elo DESC",
     )
     .all() as (Engine & { owner: string })[];
 }
@@ -198,6 +198,7 @@ export function getLeaderboardWithDelta(): (Engine & { owner: string; elo_delta:
        LIMIT 1) as elo_delta
      FROM engines e
      JOIN users u ON e.user_id = u.id
+     WHERE e.status = 'active'
      ORDER BY e.elo DESC`,
   ).all() as (Engine & { owner: string; elo_delta: number | null })[];
   return engines;

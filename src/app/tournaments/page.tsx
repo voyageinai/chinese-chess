@@ -91,10 +91,11 @@ export default function TournamentsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [enginesLoading, setEnginesLoading] = useState(false);
 
-  // Ranked mode
+  // Ranked / gauntlet mode
   const [myEngines, setMyEngines] = useState<{ id: string; name: string; elo: number }[]>([]);
   const [rankedEngineId, setRankedEngineId] = useState("");
   const [formGameCount, setFormGameCount] = useState("3");
+  const [gauntletOpponentIds, setGauntletOpponentIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     Promise.all([
@@ -152,16 +153,26 @@ export default function TournamentsPage() {
           setCreating(false);
           return;
         }
+        if (formFormat === "gauntlet" && gauntletOpponentIds.size === 0) {
+          setFormError("请至少选择一个对手");
+          setCreating(false);
+          return;
+        }
+        const payload: Record<string, unknown> = {
+          engineId: rankedEngineId,
+          timeBase: parseInt(formTimeBase, 10),
+          timeInc: parseInt(formTimeInc, 10),
+          label: formFormat === "gauntlet" ? "定级赛" : "排位赛",
+        };
+        if (formFormat === "gauntlet") {
+          payload.opponentIds = [...gauntletOpponentIds];
+        } else {
+          payload.gameCount = parseInt(formGameCount, 10) || 3;
+        }
         res = await fetch("/api/quick-match", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            engineId: rankedEngineId,
-            gameCount: parseInt(formGameCount, 10) || 3,
-            timeBase: parseInt(formTimeBase, 10),
-            timeInc: parseInt(formTimeInc, 10),
-            label: formFormat === "gauntlet" ? "定级赛" : "排位赛",
-          }),
+          body: JSON.stringify(payload),
         });
       } else {
         // Tournament mode → tournament API
@@ -269,7 +280,7 @@ export default function TournamentsPage() {
                     {([
                       ["round_robin", "循环赛", "每对引擎互相对弈"],
                       ["knockout", "淘汰赛", "输者淘汰，决出冠军"],
-                      ["gauntlet", "定级赛", "挑战者 vs 多个对手"],
+                      ["gauntlet", "定级赛", "选择对手，测试实力"],
                       ["swiss", "排位赛", "自动匹配对手"],
                     ] as const).map(([val, label, desc]) => (
                       <button
@@ -291,7 +302,7 @@ export default function TournamentsPage() {
                   </div>
                 </div>
                 {formFormat === "swiss" || formFormat === "gauntlet" ? (
-                  /* ── Matchmaking mode (ranked/calibration): pick own engine ── */
+                  /* ── Ranked / Gauntlet: pick own engine + opponents ── */
                   <>
                     <div className="space-y-1.5">
                       <Label>选择你的引擎</Label>
@@ -305,7 +316,15 @@ export default function TournamentsPage() {
                             <button
                               key={e.id}
                               type="button"
-                              onClick={() => setRankedEngineId(e.id)}
+                              onClick={() => {
+                                setRankedEngineId(e.id);
+                                // Remove this engine from gauntlet opponents if selected
+                                setGauntletOpponentIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.delete(e.id);
+                                  return next;
+                                });
+                              }}
                               className={`rounded-lg border px-3 py-2 text-left transition-all ${
                                 rankedEngineId === e.id
                                   ? "border-vermilion bg-vermilion/5 ring-1 ring-vermilion/30"
@@ -324,21 +343,79 @@ export default function TournamentsPage() {
                         </div>
                       )}
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="gameCount">对局数</Label>
-                      <Input
-                        id="gameCount"
-                        type="number"
-                        min="1"
-                        max="20"
-                        value={formGameCount}
-                        onChange={(e) => setFormGameCount(e.target.value)}
-                        required
-                      />
-                      <p className="text-xs text-ink-muted">
-                        系统自动匹配不重复对手，每局随机分配红黑方
-                      </p>
-                    </div>
+                    {formFormat === "gauntlet" ? (
+                      /* ── Gauntlet: pick opponents manually ── */
+                      <div className="space-y-1.5">
+                        <Label>
+                          选择对手{" "}
+                          <span className="text-ink-muted text-xs font-normal">
+                            （最多 10 个，每个对手一局随机红黑）
+                          </span>
+                        </Label>
+                        {enginesLoading ? (
+                          <p className="text-sm text-ink-muted animate-pulse py-2">加载引擎列表...</p>
+                        ) : availableEngines.filter((e) => e.id !== rankedEngineId).length === 0 ? (
+                          <p className="text-sm text-ink-muted py-2">暂无可选对手</p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2 max-h-[240px] overflow-y-auto pr-1">
+                            {availableEngines
+                              .filter((e) => e.id !== rankedEngineId)
+                              .map((e) => (
+                                <button
+                                  key={e.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setGauntletOpponentIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(e.id)) {
+                                        next.delete(e.id);
+                                      } else if (next.size < 10) {
+                                        next.add(e.id);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className={`rounded-lg border px-3 py-2 text-left transition-all ${
+                                    gauntletOpponentIds.has(e.id)
+                                      ? "border-vermilion bg-vermilion/5 ring-1 ring-vermilion/30"
+                                      : "border-paper-300 hover:border-paper-400 hover:bg-paper-100"
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    {gauntletOpponentIds.has(e.id) && (
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-vermilion shrink-0" />
+                                    )}
+                                    <span className="font-semibold text-sm text-ink truncate">{e.name}</span>
+                                  </span>
+                                  <span className="block text-xs text-ink-muted font-mono">{Math.round(e.elo)}</span>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                        {gauntletOpponentIds.size > 0 && (
+                          <p className="text-xs text-ink-muted">
+                            已选 {gauntletOpponentIds.size} 个对手
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      /* ── Swiss: auto-match, just pick game count ── */
+                      <div className="space-y-1.5">
+                        <Label htmlFor="gameCount">对局数</Label>
+                        <Input
+                          id="gameCount"
+                          type="number"
+                          min="1"
+                          max="20"
+                          value={formGameCount}
+                          onChange={(e) => setFormGameCount(e.target.value)}
+                          required
+                        />
+                        <p className="text-xs text-ink-muted">
+                          系统自动匹配不重复对手，每局随机分配红黑方
+                        </p>
+                      </div>
+                    )}
                   </>
                 ) : (
                   /* ── Tournament mode: rounds + multi-engine selection ── */
