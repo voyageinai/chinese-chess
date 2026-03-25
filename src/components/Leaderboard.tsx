@@ -73,7 +73,7 @@ export function Leaderboard({ engines }: LeaderboardProps) {
   }
 
   return (
-    <div className="rounded-lg border border-paper-300 bg-paper-50 overflow-hidden">
+    <div className="rounded-lg border border-paper-300 bg-paper-50 overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="border-paper-300 hover:bg-transparent">
@@ -85,10 +85,10 @@ export function Leaderboard({ engines }: LeaderboardProps) {
               <TableHead className="text-ink-muted">作者</TableHead>
             )}
             <TableHead className="text-right text-ink-muted">等级分</TableHead>
-            <TableHead className="text-right text-ink-muted">胜</TableHead>
-            <TableHead className="text-right text-ink-muted">负</TableHead>
-            <TableHead className="text-right text-ink-muted">和</TableHead>
-            <TableHead className="text-right text-ink-muted">胜率</TableHead>
+            <TableHead className="text-right text-ink-muted hidden sm:table-cell">胜</TableHead>
+            <TableHead className="text-right text-ink-muted hidden sm:table-cell">负</TableHead>
+            <TableHead className="text-right text-ink-muted hidden sm:table-cell">和</TableHead>
+            <TableHead className="text-right text-ink-muted hidden sm:table-cell">胜率</TableHead>
             <TableHead className="text-right text-ink-muted">对局</TableHead>
           </TableRow>
         </TableHeader>
@@ -148,16 +148,16 @@ export function Leaderboard({ engines }: LeaderboardProps) {
                     </span>
                   )}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm text-green-700">
+                <TableCell className="text-right font-mono text-sm text-green-700 hidden sm:table-cell">
                   {engine.wins}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm text-vermilion">
+                <TableCell className="text-right font-mono text-sm text-vermilion hidden sm:table-cell">
                   {engine.losses}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm text-ink-muted">
+                <TableCell className="text-right font-mono text-sm text-ink-muted hidden sm:table-cell">
                   {engine.draws}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm">
+                <TableCell className="text-right font-mono text-sm hidden sm:table-cell">
                   {engine.wins + engine.losses + engine.draws > 0
                     ? `${((engine.wins / (engine.wins + engine.losses + engine.draws)) * 100).toFixed(1)}%`
                     : "-"}

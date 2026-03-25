@@ -326,7 +326,7 @@ export default function GamePage({
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
-  }, [canSubscribe, id, requestResync]);
+  }, [canSubscribe, game?.opening_fen, id, requestResync]);
 
   // --- Resync on tab visibility change ---
   // When the user switches back to this tab, the rAF clock may have drifted
@@ -550,7 +550,7 @@ export default function GamePage({
         <EvalChart moves={moves} currentIndex={currentIndex} />
 
         {/* Replay controls */}
-        <div className="flex justify-center gap-2">
+        <div className="flex justify-center gap-2 sticky bottom-0 z-10 bg-paper-100/90 backdrop-blur-sm py-3 -mx-1 px-1 md:static md:bg-transparent md:backdrop-blur-none md:py-0 md:mx-0 md:px-0">
           <Button
             variant="outline"
             size="icon-sm"

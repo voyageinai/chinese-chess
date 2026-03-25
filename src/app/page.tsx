@@ -84,7 +84,7 @@ export default function Home() {
     <div className="space-y-12">
       {/* Hero */}
       <header className="text-center py-8">
-        <h1 className="font-brush text-5xl text-ink">象棋擂台</h1>
+        <h1 className="font-brush text-3xl sm:text-5xl text-ink">象棋擂台</h1>
         <p className="mt-3 text-ink-light text-lg">中国象棋引擎锦标赛平台</p>
       </header>
 
