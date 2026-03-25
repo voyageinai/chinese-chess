@@ -75,8 +75,19 @@ export function createEngine(
   return getEngineById(id)!;
 }
 
-export function getEnginesByUser(userId: string): Engine[] {
+export function getEnginesByUser(
+  userId: string,
+  status?: Engine["status"],
+): Engine[] {
   const db = getDb();
+  if (status) {
+    return db
+      .prepare(
+        "SELECT * FROM engines WHERE user_id = ? AND status = ? ORDER BY uploaded_at DESC",
+      )
+      .all(userId, status) as Engine[];
+  }
+
   return db
     .prepare(
       "SELECT * FROM engines WHERE user_id = ? ORDER BY uploaded_at DESC",

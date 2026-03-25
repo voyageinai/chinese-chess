@@ -84,6 +84,13 @@ export async function PUT(
       );
     }
 
+    if (engine.status === "disabled") {
+      return NextResponse.json(
+        { error: "引擎已被禁用" },
+        { status: 403 },
+      );
+    }
+
     if (engine.visibility !== "public" && engine.user_id !== user.id && !isAdmin(user)) {
       return NextResponse.json(
         { error: "Engine is not available for this tournament" },

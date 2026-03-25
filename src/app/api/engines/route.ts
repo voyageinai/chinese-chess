@@ -88,8 +88,19 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url);
     const scope = url.searchParams.get("scope");
+    const status = url.searchParams.get("status");
+
+    if (status !== null && status !== "active" && status !== "disabled") {
+      return NextResponse.json(
+        { error: "Invalid status. Must be 'active' or 'disabled'" },
+        { status: 400 },
+      );
+    }
+
     const engines =
-      scope === "owned" ? getEnginesByUser(user.id) : getVisibleEngines();
+      scope === "owned"
+        ? getEnginesByUser(user.id, status ?? undefined)
+        : getVisibleEngines();
     return NextResponse.json({ engines: sanitizeEngines(engines) });
   } catch (error) {
     console.error("Get engines error:", error);

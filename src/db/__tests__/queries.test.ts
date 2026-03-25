@@ -13,6 +13,7 @@ import {
   deleteEngine,
   isEngineReferenced,
   updateEngineElo,
+  updateEngineStatus,
   getLeaderboard,
   createTournament,
   getTournaments,
@@ -124,6 +125,24 @@ describe("Engines", () => {
     expect(lb[0].owner).toBe("bob");
     expect(lb[1].name).toBe("AliceEngine");
     expect(lb[1].owner).toBe("alice");
+  });
+
+  it("filters owned engines by status when requested", () => {
+    const user = createUser("alice", "hashedpw1");
+    const activeEngine = createEngine(user.id, "ActiveEngine", "/bin/a");
+    const disabledEngine = createEngine(user.id, "DisabledEngine", "/bin/b");
+
+    updateEngineStatus(disabledEngine.id, "disabled");
+
+    const activeOnly = getEnginesByUser(user.id, "active");
+    const disabledOnly = getEnginesByUser(user.id, "disabled");
+    const all = getEnginesByUser(user.id);
+
+    expect(activeOnly).toHaveLength(1);
+    expect(activeOnly[0].id).toBe(activeEngine.id);
+    expect(disabledOnly).toHaveLength(1);
+    expect(disabledOnly[0].id).toBe(disabledEngine.id);
+    expect(all).toHaveLength(2);
   });
 
   it("marks engines as referenced once they are used in a tournament", () => {

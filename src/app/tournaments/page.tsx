@@ -119,7 +119,7 @@ export default function TournamentsPage() {
     setEnginesLoading(true);
     Promise.all([
       fetch("/api/leaderboard").then((r) => r.json()).then((d) => d.leaderboard ?? []),
-      fetch("/api/engines?scope=owned").then((r) => r.ok ? r.json() : { engines: [] }).then((d) => d.engines ?? []),
+      fetch("/api/engines?scope=owned&status=active").then((r) => r.ok ? r.json() : { engines: [] }).then((d) => d.engines ?? []),
     ])
       .then(([leaderboard, owned]) => {
         setAvailableEngines(leaderboard);

@@ -41,7 +41,7 @@ export function QuickMatchDialog({ open, onOpenChange }: QuickMatchDialogProps) 
     if (!open) return;
     setLoading(true);
     setError("");
-    fetch("/api/engines?scope=owned")
+    fetch("/api/engines?scope=owned&status=active")
       .then((r) => (r.ok ? r.json() : { engines: [] }))
       .then((d) => setEngines(d.engines ?? []))
       .catch(() => {})
