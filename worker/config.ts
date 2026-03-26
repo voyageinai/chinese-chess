@@ -4,6 +4,7 @@ export interface WorkerConfig {
   workerId: string;
   maxConcurrentMatches: number;
   engineCacheDir: string;
+  researchTempDir: string;
   pollIntervalMs: number;
   heartbeatIntervalMs: number;
 }
@@ -28,6 +29,7 @@ export function loadConfig(): WorkerConfig {
       parseInt(process.env.MAX_CONCURRENT_MATCHES || "2", 10),
     ),
     engineCacheDir: process.env.WORKER_ENGINE_CACHE_DIR || "./data/engine-cache",
+    researchTempDir: process.env.WORKER_RESEARCH_TEMP_DIR || "./data/research-cache",
     pollIntervalMs: 3000,
     heartbeatIntervalMs: 15000,
   };

@@ -200,6 +200,48 @@ function runMigrations(database: Database.Database): void {
   if (!hasColumn(database, "tournaments", "sandbox")) {
     database.exec("ALTER TABLE tournaments ADD COLUMN sandbox INTEGER NOT NULL DEFAULT 0");
   }
+
+  // -- v10: Distributed research jobs --
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS research_jobs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      output_path TEXT NOT NULL,
+      params_json TEXT NOT NULL,
+      shard_count INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      started_at INTEGER,
+      finished_at INTEGER,
+      error_text TEXT
+    )
+  `);
+  database.exec("CREATE INDEX IF NOT EXISTS idx_research_jobs_status ON research_jobs(status)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_research_jobs_created ON research_jobs(created_at)");
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS research_shards (
+      id TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL REFERENCES research_jobs(id) ON DELETE CASCADE,
+      shard_index INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      worker_id TEXT,
+      lease_id TEXT,
+      seed INTEGER NOT NULL,
+      positions INTEGER NOT NULL,
+      params_json TEXT NOT NULL,
+      claimed_at INTEGER,
+      last_heartbeat_at INTEGER,
+      uploaded_path TEXT,
+      stats_json TEXT,
+      error_text TEXT,
+      finished_at INTEGER,
+      UNIQUE(job_id, shard_index)
+    )
+  `);
+  database.exec("CREATE INDEX IF NOT EXISTS idx_research_shards_job ON research_shards(job_id)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_research_shards_status ON research_shards(status)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_research_shards_worker ON research_shards(worker_id)");
 }
 
 function seedDefaultEngines(database: Database.Database): void {

@@ -35,6 +35,34 @@ export interface WorkerTask {
 }
 
 // ---------------------------------------------------------------------------
+// Research Task
+// ---------------------------------------------------------------------------
+
+export type ResearchTaskKind = "policy" | "balanced";
+
+export interface ResearchTaskParams {
+  positions: number;
+  seed: number;
+  outputFilename: string;
+  teacherEngineId: string;
+  movetime?: number;
+  selfplayMovetime?: number;
+  analysisMovetime?: number;
+}
+
+export interface ResearchTask {
+  leaseId: string;
+  jobId: string;
+  shardId: string;
+  shardIndex: number;
+  kind: ResearchTaskKind;
+  outputPath: string;
+  leaseExpiresAt: number;
+  teacherEngine: EngineRef;
+  params: ResearchTaskParams;
+}
+
+// ---------------------------------------------------------------------------
 // Worker → Master request payloads
 // ---------------------------------------------------------------------------
 
@@ -46,6 +74,12 @@ export interface HeartbeatRequest {
   leaseId: string;
   workerId: string;
   ply: number;
+}
+
+export interface ResearchHeartbeatRequest {
+  leaseId: string;
+  workerId: string;
+  progress: number;
 }
 
 export interface MoveReport {
@@ -82,6 +116,13 @@ export interface ResultReport {
   moves: string; // JSON stringified StoredMove[]
   redTimeLeft: number;
   blackTimeLeft: number;
+}
+
+export interface ResearchResultReport {
+  leaseId: string;
+  status: "completed" | "failed";
+  statsJson?: string | null;
+  error?: string | null;
 }
 
 // ---------------------------------------------------------------------------

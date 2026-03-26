@@ -1,4 +1,12 @@
-import type { WorkerTask, MoveReport, ThinkingReport, ResultReport } from "../src/server/distributed/types";
+import type {
+  WorkerTask,
+  ResearchTask,
+  MoveReport,
+  ThinkingReport,
+  ResultReport,
+  ResearchHeartbeatRequest,
+  ResearchResultReport,
+} from "../src/server/distributed/types";
 
 export class ApiClient {
   private baseUrl: string;
@@ -44,6 +52,24 @@ export class ApiClient {
       return data.task ?? null;
     } catch (err) {
       console.error("[api] poll error:", err);
+      return null;
+    }
+  }
+
+  async pollResearchTask(): Promise<ResearchTask | null> {
+    try {
+      const res = await this.request("/api/internal/research/poll", "POST", {
+        workerId: this.workerId,
+      });
+      if (res.status === 204) return null;
+      if (!res.ok) {
+        console.error(`[api] research poll failed: ${res.status} ${await res.text()}`);
+        return null;
+      }
+      const data = await res.json();
+      return data.task ?? null;
+    } catch (err) {
+      console.error("[api] research poll error:", err);
       return null;
     }
   }
@@ -106,6 +132,65 @@ export class ApiClient {
       return res.ok;
     } catch (err) {
       console.error(`[api] reportResult error for ${gameId}:`, err);
+      return false;
+    }
+  }
+
+  async heartbeatResearch(
+    shardId: string,
+    report: ResearchHeartbeatRequest,
+  ): Promise<boolean> {
+    try {
+      const res = await this.request(
+        `/api/internal/research/${shardId}/heartbeat`,
+        "POST",
+        report,
+      );
+      if (res.status === 409) return false;
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async uploadResearchArtifact(
+    shardId: string,
+    leaseId: string,
+    filename: string,
+    data: Buffer,
+  ): Promise<boolean> {
+    try {
+      const url = `${this.baseUrl}/api/internal/research/${shardId}/upload`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "x-worker-secret": this.secret,
+          "x-lease-id": leaseId,
+          "x-artifact-filename": filename,
+          "content-type": "application/octet-stream",
+        },
+        body: new Uint8Array(data),
+      });
+      return res.ok;
+    } catch (err) {
+      console.error(`[api] uploadResearchArtifact ${shardId} error:`, err);
+      return false;
+    }
+  }
+
+  async reportResearchResult(
+    shardId: string,
+    report: ResearchResultReport,
+  ): Promise<boolean> {
+    try {
+      const res = await this.request(
+        `/api/internal/research/${shardId}/result`,
+        "POST",
+        report,
+      );
+      return res.ok;
+    } catch (err) {
+      console.error(`[api] reportResearchResult ${shardId} error:`, err);
       return false;
     }
   }

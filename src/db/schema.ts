@@ -76,4 +76,41 @@ CREATE TABLE IF NOT EXISTS invite_codes (
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+
+CREATE TABLE IF NOT EXISTS research_jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  output_path TEXT NOT NULL,
+  params_json TEXT NOT NULL,
+  shard_count INTEGER NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  started_at INTEGER,
+  finished_at INTEGER,
+  error_text TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_research_jobs_status ON research_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_research_jobs_created ON research_jobs(created_at);
+
+CREATE TABLE IF NOT EXISTS research_shards (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES research_jobs(id) ON DELETE CASCADE,
+  shard_index INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  worker_id TEXT,
+  lease_id TEXT,
+  seed INTEGER NOT NULL,
+  positions INTEGER NOT NULL,
+  params_json TEXT NOT NULL,
+  claimed_at INTEGER,
+  last_heartbeat_at INTEGER,
+  uploaded_path TEXT,
+  stats_json TEXT,
+  error_text TEXT,
+  finished_at INTEGER,
+  UNIQUE(job_id, shard_index)
+);
+CREATE INDEX IF NOT EXISTS idx_research_shards_job ON research_shards(job_id);
+CREATE INDEX IF NOT EXISTS idx_research_shards_status ON research_shards(status);
+CREATE INDEX IF NOT EXISTS idx_research_shards_worker ON research_shards(worker_id);
 `;

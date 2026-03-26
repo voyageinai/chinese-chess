@@ -2,6 +2,7 @@ import { loadConfig } from "./config";
 import { ApiClient } from "./api-client";
 import { EngineCache } from "./engine-cache";
 import { executeTask } from "./runner";
+import { executeResearchTask } from "./research-runner";
 
 const config = loadConfig();
 const apiClient = new ApiClient(config.masterUrl, config.workerSecret, config.workerId);
@@ -29,23 +30,37 @@ function sleep(ms: number): Promise<void> {
 
 async function workerLoop(slot: number): Promise<void> {
   while (!shuttingDown) {
-    const task = await apiClient.pollTask();
-    if (!task) {
-      // No work available, back off with jitter
-      await sleep(config.pollIntervalMs + Math.random() * 1000);
+    const matchTask = await apiClient.pollTask();
+    if (matchTask) {
+      console.log(
+        `[worker:${slot}] Game ${matchTask.gameId} | ${matchTask.redEngine.name} vs ${matchTask.blackEngine.name}`,
+      );
+
+      try {
+        await executeTask(matchTask, apiClient, engineCache, config);
+        console.log(`[worker:${slot}] Game ${matchTask.gameId} completed`);
+      } catch (err) {
+        console.error(`[worker:${slot}] Game ${matchTask.gameId} failed:`, err);
+      }
       continue;
     }
 
-    console.log(
-      `[worker:${slot}] Game ${task.gameId} | ${task.redEngine.name} vs ${task.blackEngine.name}`,
-    );
-
-    try {
-      await executeTask(task, apiClient, engineCache, config);
-      console.log(`[worker:${slot}] Game ${task.gameId} completed`);
-    } catch (err) {
-      console.error(`[worker:${slot}] Game ${task.gameId} failed:`, err);
+    const researchTask = await apiClient.pollResearchTask();
+    if (researchTask) {
+      console.log(
+        `[worker:${slot}] Research ${researchTask.kind} shard ${researchTask.shardId} | positions=${researchTask.params.positions}`,
+      );
+      try {
+        await executeResearchTask(researchTask, apiClient, engineCache, config);
+        console.log(`[worker:${slot}] Research shard ${researchTask.shardId} completed`);
+      } catch (err) {
+        console.error(`[worker:${slot}] Research shard ${researchTask.shardId} failed:`, err);
+      }
+      continue;
     }
+
+    // No work available, back off with jitter
+    await sleep(config.pollIntervalMs + Math.random() * 1000);
   }
 
   console.log(`[worker:${slot}] Stopped`);

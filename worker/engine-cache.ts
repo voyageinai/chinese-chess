@@ -15,6 +15,7 @@ import type { EngineRef } from "../src/server/distributed/types";
 export class EngineCache {
   private cacheDir: string;
   private apiClient: ApiClient;
+  private inflight = new Map<string, Promise<string>>();
 
   constructor(cacheDir: string, apiClient: ApiClient) {
     this.cacheDir = cacheDir;
@@ -27,6 +28,19 @@ export class EngineCache {
    * Returns the absolute path to the engine binary.
    */
   async ensureEngine(engine: EngineRef): Promise<string> {
+    const existing = this.inflight.get(engine.id);
+    if (existing) {
+      return existing;
+    }
+
+    const pending = this.ensureEngineOnce(engine).finally(() => {
+      this.inflight.delete(engine.id);
+    });
+    this.inflight.set(engine.id, pending);
+    return pending;
+  }
+
+  private async ensureEngineOnce(engine: EngineRef): Promise<string> {
     const engineDir = path.join(this.cacheDir, engine.id);
     const hashFile = path.join(engineDir, "sha256.txt");
 
@@ -34,7 +48,7 @@ export class EngineCache {
     if (existsSync(hashFile)) {
       const cachedHash = readFileSync(hashFile, "utf-8").trim();
       if (cachedHash === engine.contentHash) {
-        const binaryPath = this.findBinary(engineDir);
+        const binaryPath = this.findBinary(engineDir, engine.name);
         if (binaryPath) return binaryPath;
       }
     }
@@ -47,7 +61,7 @@ export class EngineCache {
 
     if (result.notModified) {
       // Shouldn't happen if hash was different, but be safe
-      const binaryPath = this.findBinary(engineDir);
+      const binaryPath = this.findBinary(engineDir, engine.name);
       if (binaryPath) return binaryPath;
     }
 
@@ -93,7 +107,7 @@ export class EngineCache {
       `[cache] Engine ${engine.name} cached (${(result.data.length / 1024 / 1024).toFixed(1)}MB)`,
     );
 
-    const binaryPath = this.findBinary(engineDir);
+    const binaryPath = this.findBinary(engineDir, engine.name);
     if (!binaryPath) {
       throw new Error(
         `Downloaded engine ${engine.id} but could not find binary in ${engineDir}`,
@@ -106,16 +120,32 @@ export class EngineCache {
    * Find the main binary/script in an engine directory.
    * Skips sha256.txt and .nnue files.
    */
-  private findBinary(dir: string): string | null {
+  private findBinary(dir: string, engineName: string): string | null {
     const files = readdirSync(dir).filter(
       (f) =>
         f !== "sha256.txt" &&
         !f.endsWith(".nnue") &&
         !f.startsWith(".") &&
         !f.startsWith("_"),
-    );
+    ).sort();
 
     if (files.length === 0) return null;
+
+    const preferred = this.normalize(engineName);
+    if (preferred) {
+      const exact = files.find((file) => this.normalize(path.parse(file).name) === preferred);
+      if (exact) {
+        return path.resolve(dir, exact);
+      }
+
+      const partial = files.find((file) => {
+        const normalized = this.normalize(path.parse(file).name);
+        return normalized.includes(preferred) || preferred.includes(normalized);
+      });
+      if (partial) {
+        return path.resolve(dir, partial);
+      }
+    }
 
     // Prefer files with script extensions, then any executable
     for (const ext of [".py", ".js"]) {
@@ -135,5 +165,9 @@ export class EngineCache {
     }
 
     return null;
+  }
+
+  private normalize(text: string): string {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, "");
   }
 }

@@ -22,6 +22,72 @@ interface UserRow extends User {
   password: string;
 }
 
+export type ResearchJobKind = "policy" | "balanced";
+export type ResearchJobStatus =
+  | "pending"
+  | "running"
+  | "finalizing"
+  | "completed"
+  | "failed";
+export type ResearchShardStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
+
+export interface ResearchJobRow {
+  id: string;
+  kind: ResearchJobKind;
+  status: ResearchJobStatus;
+  output_path: string;
+  params_json: string;
+  shard_count: number;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  error_text: string | null;
+}
+
+export interface ResearchShardRow {
+  id: string;
+  job_id: string;
+  shard_index: number;
+  status: ResearchShardStatus;
+  worker_id: string | null;
+  lease_id: string | null;
+  seed: number;
+  positions: number;
+  params_json: string;
+  claimed_at: number | null;
+  last_heartbeat_at: number | null;
+  uploaded_path: string | null;
+  stats_json: string | null;
+  error_text: string | null;
+  finished_at: number | null;
+}
+
+export interface ResearchShardClaimRow extends ResearchShardRow {
+  job_kind: ResearchJobKind;
+  job_status: ResearchJobStatus;
+  job_output_path: string;
+  job_params_json: string;
+}
+
+interface CreateResearchJobOptions {
+  kind: ResearchJobKind;
+  outputPath: string;
+  positions: number;
+  shardCount: number;
+  seed: number;
+  params: Record<string, unknown>;
+}
+
+function splitTotal(total: number, parts: number): number[] {
+  const base = Math.floor(total / parts);
+  const extra = total % parts;
+  return Array.from({ length: parts }, (_, idx) => base + (idx < extra ? 1 : 0));
+}
+
 export function createUser(username: string, passwordHash: string): User {
   const db = getDb();
   const id = nanoid();
@@ -113,6 +179,13 @@ export function getEngineById(id: string): Engine | undefined {
   return db
     .prepare("SELECT * FROM engines WHERE id = ?")
     .get(id) as Engine | undefined;
+}
+
+export function getEngineByName(name: string): Engine | undefined {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM engines WHERE lower(name) = lower(?) ORDER BY uploaded_at DESC LIMIT 1")
+    .get(name) as Engine | undefined;
 }
 
 export function isEngineInRunningTournament(id: string): boolean {
@@ -729,4 +802,267 @@ export function getSystemStats(): {
     tournamentCount: tournaments.cnt,
     activeGameCount: activeGames.cnt,
   };
+}
+
+// ── Distributed Research Jobs ────────────────────────────────────────
+
+export function createResearchJob(opts: CreateResearchJobOptions): ResearchJobRow {
+  const db = getDb();
+  const jobId = nanoid();
+  const shardPositions = splitTotal(opts.positions, opts.shardCount);
+
+  const create = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO research_jobs (id, kind, status, output_path, params_json, shard_count)
+       VALUES (?, ?, 'pending', ?, ?, ?)`,
+    ).run(
+      jobId,
+      opts.kind,
+      opts.outputPath,
+      JSON.stringify({
+        ...opts.params,
+        positions: opts.positions,
+        seed: opts.seed,
+      }),
+      opts.shardCount,
+    );
+
+    const insertShard = db.prepare(
+      `INSERT INTO research_shards (id, job_id, shard_index, status, seed, positions, params_json)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
+    );
+
+    for (let idx = 0; idx < shardPositions.length; idx++) {
+      insertShard.run(
+        nanoid(),
+        jobId,
+        idx,
+        opts.seed + idx * 9973,
+        shardPositions[idx],
+        JSON.stringify(opts.params),
+      );
+    }
+  });
+
+  create();
+  return getResearchJobById(jobId)!;
+}
+
+export function getResearchJobById(id: string): ResearchJobRow | undefined {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM research_jobs WHERE id = ?")
+    .get(id) as ResearchJobRow | undefined;
+}
+
+export function listResearchJobs(limit = 20): ResearchJobRow[] {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM research_jobs ORDER BY created_at DESC LIMIT ?")
+    .all(limit) as ResearchJobRow[];
+}
+
+export function getResearchShardById(id: string): ResearchShardRow | undefined {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM research_shards WHERE id = ?")
+    .get(id) as ResearchShardRow | undefined;
+}
+
+export function getResearchShardsByJob(jobId: string): ResearchShardRow[] {
+  const db = getDb();
+  return db
+    .prepare("SELECT * FROM research_shards WHERE job_id = ? ORDER BY shard_index ASC")
+    .all(jobId) as ResearchShardRow[];
+}
+
+export function pollResearchShard(
+  workerId: string,
+  heartbeatTimeoutSec = 90,
+): ResearchShardClaimRow | undefined {
+  const db = getDb();
+  const staleBefore = Math.floor(Date.now() / 1000) - heartbeatTimeoutSec;
+
+  const claim = db.transaction(() => {
+    const row = db
+      .prepare(
+        `SELECT
+           rs.*,
+           rj.kind as job_kind,
+           rj.status as job_status,
+           rj.output_path as job_output_path,
+           rj.params_json as job_params_json
+         FROM research_shards rs
+         JOIN research_jobs rj ON rj.id = rs.job_id
+         WHERE rj.status IN ('pending', 'running')
+           AND (
+             rs.status = 'pending'
+             OR (rs.status = 'running' AND COALESCE(rs.last_heartbeat_at, 0) < ?)
+           )
+         ORDER BY rj.created_at ASC, rs.shard_index ASC
+         LIMIT 1`,
+      )
+      .get(staleBefore) as ResearchShardClaimRow | undefined;
+
+    if (!row) return undefined;
+
+    const leaseId = nanoid();
+    db.prepare(
+      `UPDATE research_shards
+       SET status = 'running',
+           worker_id = ?,
+           lease_id = ?,
+           claimed_at = unixepoch(),
+           last_heartbeat_at = unixepoch(),
+           uploaded_path = NULL,
+           stats_json = NULL,
+           error_text = NULL,
+           finished_at = NULL
+       WHERE id = ?`,
+    ).run(workerId, leaseId, row.id);
+
+    db.prepare(
+      `UPDATE research_jobs
+       SET status = 'running',
+           started_at = COALESCE(started_at, unixepoch()),
+           error_text = NULL
+       WHERE id = ? AND status IN ('pending', 'running')`,
+    ).run(row.job_id);
+
+    return {
+      ...row,
+      status: "running" as ResearchShardStatus,
+      worker_id: workerId,
+      lease_id: leaseId,
+      claimed_at: Math.floor(Date.now() / 1000),
+      last_heartbeat_at: Math.floor(Date.now() / 1000),
+      uploaded_path: null,
+      stats_json: null,
+      error_text: null,
+      finished_at: null,
+      job_status: "running" as ResearchJobStatus,
+    };
+  });
+
+  return claim();
+}
+
+export function renewResearchShardLease(
+  shardId: string,
+  leaseId: string,
+  workerId: string,
+): boolean {
+  const db = getDb();
+  const result = db.prepare(
+    `UPDATE research_shards
+     SET last_heartbeat_at = unixepoch()
+     WHERE id = ?
+       AND lease_id = ?
+       AND worker_id = ?
+       AND status = 'running'`,
+  ).run(shardId, leaseId, workerId);
+  return result.changes > 0;
+}
+
+export function recordResearchShardUpload(
+  shardId: string,
+  leaseId: string,
+  uploadedPath: string,
+): boolean {
+  const db = getDb();
+  const result = db.prepare(
+    `UPDATE research_shards
+     SET uploaded_path = ?, last_heartbeat_at = unixepoch()
+     WHERE id = ? AND lease_id = ? AND status = 'running'`,
+  ).run(uploadedPath, shardId, leaseId);
+  return result.changes > 0;
+}
+
+export function completeResearchShard(
+  shardId: string,
+  leaseId: string,
+  statsJson: string | null,
+): ResearchShardRow | undefined {
+  const db = getDb();
+  const finish = db.transaction(() => {
+    const row = getResearchShardById(shardId);
+    if (!row || row.lease_id !== leaseId || row.status !== "running") {
+      return undefined;
+    }
+
+    db.prepare(
+      `UPDATE research_shards
+       SET status = 'completed',
+           stats_json = ?,
+           finished_at = unixepoch(),
+           last_heartbeat_at = unixepoch()
+       WHERE id = ? AND lease_id = ?`,
+    ).run(statsJson, shardId, leaseId);
+
+    return getResearchShardById(shardId);
+  });
+
+  return finish();
+}
+
+export function failResearchShard(
+  shardId: string,
+  leaseId: string | null,
+  errorText: string,
+): ResearchShardRow | undefined {
+  const db = getDb();
+  const fail = db.transaction(() => {
+    const row = getResearchShardById(shardId);
+    if (!row) return undefined;
+    if (leaseId && row.lease_id !== leaseId) return undefined;
+
+    db.prepare(
+      `UPDATE research_shards
+       SET status = 'failed',
+           error_text = ?,
+           finished_at = unixepoch(),
+           last_heartbeat_at = unixepoch()
+       WHERE id = ?`,
+    ).run(errorText, shardId);
+
+    db.prepare(
+      `UPDATE research_jobs
+       SET status = 'failed',
+           error_text = ?,
+           finished_at = COALESCE(finished_at, unixepoch())
+       WHERE id = ? AND status != 'completed'`,
+    ).run(errorText, row.job_id);
+
+    return getResearchShardById(shardId);
+  });
+
+  return fail();
+}
+
+export function tryStartResearchJobFinalization(jobId: string): boolean {
+  const db = getDb();
+  const result = db.prepare(
+    `UPDATE research_jobs
+     SET status = 'finalizing'
+     WHERE id = ? AND status IN ('pending', 'running')`,
+  ).run(jobId);
+  return result.changes > 0;
+}
+
+export function markResearchJobCompleted(jobId: string): void {
+  const db = getDb();
+  db.prepare(
+    `UPDATE research_jobs
+     SET status = 'completed', finished_at = unixepoch(), error_text = NULL
+     WHERE id = ?`,
+  ).run(jobId);
+}
+
+export function markResearchJobFailed(jobId: string, errorText: string): void {
+  const db = getDb();
+  db.prepare(
+    `UPDATE research_jobs
+     SET status = 'failed', finished_at = COALESCE(finished_at, unixepoch()), error_text = ?
+     WHERE id = ? AND status != 'completed'`,
+  ).run(errorText, jobId);
 }
