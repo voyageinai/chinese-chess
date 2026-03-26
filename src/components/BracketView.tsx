@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Trophy } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -592,24 +593,50 @@ export function BracketView({
                   </div>
                 )}
 
-                {/* Champion badge after final round */}
+                {/* Connector + Champion badge after final round */}
                 {isLast && champion && (
-                  <div
-                    className="flex items-center shrink-0 ml-4"
-                    style={{ height }}
-                  >
+                  <>
+                    {/* Exit connector from final match */}
                     <div
-                      className="border-2 border-vermilion/40 bg-vermilion/5 rounded-xl px-5 py-4 text-center"
-                      style={{
-                        marginTop: cardTop(round.round, 0),
-                      }}
+                      className="relative shrink-0"
+                      style={{ width: CONNECTOR_W, height }}
                     >
-                      <p className="text-xs text-vermilion/70 mb-1">冠军</p>
-                      <p className="font-brush text-xl text-vermilion">
-                        {getName(engineMap, champion)}
-                      </p>
+                      <div
+                        className="absolute"
+                        style={{
+                          top: cardTop(round.round, 0) + CARD_H / 2,
+                          left: 0,
+                          width: CONNECTOR_W,
+                          height: 0,
+                          borderTop: "2px solid var(--color-paper-400)",
+                        }}
+                      />
                     </div>
-                  </div>
+                    {/* Champion card */}
+                    <div
+                      className="relative shrink-0"
+                      style={{ width: COL_W - 16, height }}
+                    >
+                      <div
+                        className="absolute"
+                        style={{
+                          top: cardTop(round.round, 0),
+                          width: COL_W - 16,
+                          height: CARD_H,
+                        }}
+                      >
+                        <div className="h-full border-2 border-vermilion/60 bg-gradient-to-b from-vermilion/8 to-vermilion/3 rounded-lg px-3 flex items-center gap-2.5">
+                          <Trophy className="w-5 h-5 text-vermilion/70 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-[10px] text-vermilion/60 font-semibold tracking-wider leading-none mb-0.5">冠军</p>
+                            <p className="text-sm font-bold text-vermilion truncate">
+                              {getName(engineMap, champion)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             );
@@ -620,9 +647,10 @@ export function BracketView({
       {/* ── Mobile: list fallback ── */}
       <div className="md:hidden space-y-4">
         {champion && (
-          <div className="border-2 border-vermilion/40 bg-vermilion/5 rounded-xl px-4 py-3 text-center">
-            <p className="text-xs text-vermilion/70 mb-1">冠军</p>
-            <p className="font-brush text-xl text-vermilion">
+          <div className="border-2 border-vermilion/60 bg-gradient-to-b from-vermilion/8 to-vermilion/3 rounded-xl px-5 py-4 text-center shadow-sm">
+            <Trophy className="w-6 h-6 text-vermilion/70 mx-auto mb-1.5" />
+            <p className="text-xs text-vermilion/60 font-semibold tracking-widest uppercase mb-1">冠军</p>
+            <p className="font-brush text-2xl text-vermilion leading-tight">
               {getName(engineMap, champion)}
             </p>
           </div>

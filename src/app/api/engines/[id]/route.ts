@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { rm } from "fs/promises";
 import path from "path";
 import { getCurrentUser } from "@/lib/auth";
-import { getEngineById, deleteEngine, isEngineReferenced } from "@/db/queries";
+import { getEngineById, softDeleteEngine, isEngineInRunningTournament } from "@/db/queries";
 import { sanitizeEngine } from "@/server/dto";
 import { denyUnauth, denyForbidden, canManageEngine } from "@/server/permissions";
 import { logAudit } from "@/server/audit";
@@ -52,14 +52,21 @@ export async function DELETE(
 
     if (!canManageEngine(user, engine)) return denyForbidden();
 
-    if (isEngineReferenced(id)) {
+    if (engine.status === "disabled") {
       return NextResponse.json(
-        { error: "Engine is already used by tournaments or games and cannot be deleted" },
+        { error: "该引擎已被删除" },
         { status: 409 },
       );
     }
 
-    // Remove binary files
+    if (isEngineInRunningTournament(id)) {
+      return NextResponse.json(
+        { error: "该引擎正在进行中的赛事中，无法删除" },
+        { status: 409 },
+      );
+    }
+
+    // Remove script files
     try {
       const engineDir = path.dirname(engine.binary_path);
       await rm(engineDir, { recursive: true, force: true });
@@ -67,8 +74,8 @@ export async function DELETE(
       // Directory may already be gone; continue with DB cleanup
     }
 
-    // Remove DB record
-    deleteEngine(id);
+    // Soft delete: mark as disabled, keep record for historical references
+    softDeleteEngine(id);
 
     logAudit("engine.delete", user.id, "engine", id, {
       name: engine.name,

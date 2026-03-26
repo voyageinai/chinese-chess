@@ -12,7 +12,6 @@ import { parseFen } from "@/lib/fen";
 import { isLegalMove } from "@/server/rules";
 
 const MAX_FILE_SIZE = parseInt(process.env.MAX_ENGINE_SIZE || "52428800", 10); // 50MB default
-const SCRIPT_EXTENSIONS = [".py", ".js"];
 
 /**
  * Verify engine: UCI handshake + coordinate system compatibility.
@@ -146,8 +145,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const engineId = nanoid();
     const filename = file.name || "engine";
+
+    const engineId = nanoid();
     const engineDir = path.join(
       process.cwd(),
       "data",
@@ -161,12 +161,9 @@ export async function POST(request: Request) {
     const binaryPath = path.join(engineDir, filename);
     const buffer = Buffer.from(await file.arrayBuffer());
     await writeFile(binaryPath, buffer);
-
-    const ext = path.extname(filename).toLowerCase();
-    if (!SCRIPT_EXTENSIONS.includes(ext)) {
-      // Binary files need executable permission
-      await chmod(binaryPath, 0o755);
-    }
+    // Ensure the file is executable (needed for native binaries;
+    // harmless for .py/.js which are spawned via interpreter)
+    await chmod(binaryPath, 0o755);
 
     // Verify engine: UCI handshake + coordinate system compatibility
     const verifyError = await verifyEngine(binaryPath);

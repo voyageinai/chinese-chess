@@ -242,37 +242,6 @@ def main():
 if __name__ == "__main__":
     main()`;
 
-  const cppExample = `#include <iostream>
-#include <string>
-using namespace std;
-
-int main() {
-    string line;
-    while (getline(cin, line)) {
-
-        if (line == "uci") {
-            cout << "id name MyCppEngine" << endl;
-            cout << "id author Me" << endl;
-            cout << "uciok" << endl;
-
-        } else if (line == "isready") {
-            cout << "readyok" << endl;
-
-        } else if (line.substr(0, 8) == "position") {
-            // 解析局面...
-
-        } else if (line.substr(0, 2) == "go") {
-            // 你的搜索算法
-            cout << "info depth 1 score cp 0" << endl;
-            cout << "bestmove h2e2" << endl;
-
-        } else if (line == "quit") {
-            break;
-        }
-    }
-    return 0;
-}`;
-
   const jsExample = `#!/usr/bin/env node
 const readline = require("readline");
 const rl = readline.createInterface({ input: process.stdin });
@@ -300,43 +269,6 @@ rl.on("line", (line) => {
     process.exit(0);
   }
 });`;
-
-  const goExample = `package main
-
-import (
-    "bufio"
-    "fmt"
-    "os"
-    "strings"
-)
-
-func main() {
-    scanner := bufio.NewScanner(os.Stdin)
-    for scanner.Scan() {
-        cmd := strings.TrimSpace(scanner.Text())
-
-        switch {
-        case cmd == "uci":
-            fmt.Println("id name MyGoEngine")
-            fmt.Println("id author Me")
-            fmt.Println("uciok")
-
-        case cmd == "isready":
-            fmt.Println("readyok")
-
-        case strings.HasPrefix(cmd, "position"):
-            // 解析局面...
-
-        case strings.HasPrefix(cmd, "go"):
-            // 你的搜索算法
-            fmt.Println("info depth 1 score cp 0")
-            fmt.Println("bestmove h2e2")
-
-        case cmd == "quit":
-            return
-        }
-    }
-}`;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -390,7 +322,7 @@ func main() {
         <Step
           number={1}
           title="理解 UCI 协议"
-          description="你的引擎可以是编译好的二进制文件，也可以是 .py 或 .js 脚本。平台通过标准输入输出和它对话——就像聊天一样，平台发消息，引擎回复。"
+          description="上传 .py 或 .js 脚本即可。平台通过标准输入输出和它对话——就像聊天一样，平台发消息，引擎回复。"
           icon={MessageSquare}
         >
           <Card>
@@ -540,9 +472,7 @@ func main() {
           <Tabs defaultValue="python" className="w-full">
             <TabsList className="mb-4">
               <TabsTrigger value="python">Python</TabsTrigger>
-              <TabsTrigger value="cpp">C++</TabsTrigger>
               <TabsTrigger value="js">JavaScript</TabsTrigger>
-              <TabsTrigger value="go">Go</TabsTrigger>
             </TabsList>
 
             <TabsContent value="python">
@@ -552,23 +482,11 @@ func main() {
                   直接上传 .py 文件
                 </p>
                 <p className="text-ink-muted">
-                  平台支持直接上传 .py 脚本，无需编译或打包。上传后平台会自动用 python3 运行你的脚本。
-                  也可以本地测试：
+                  上传后平台会自动用 python3 运行你的脚本，仅支持标准库。
+                  本地测试：
                 </p>
                 <code className="font-mono text-xs block mt-1">
                   python3 my_engine.py
-                </code>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="cpp">
-              <Code language="c++">{cppExample}</Code>
-              <div className="mt-3 p-3 bg-vermilion/5 border border-vermilion/10 rounded-lg text-sm text-ink-light">
-                <p className="font-semibold text-vermilion mb-1">
-                  编译 & 运行
-                </p>
-                <code className="font-mono text-xs">
-                  g++ -O2 -o my_engine my_engine.cpp
                 </code>
               </div>
             </TabsContent>
@@ -580,23 +498,11 @@ func main() {
                   直接上传 .js 文件
                 </p>
                 <p className="text-ink-muted">
-                  平台支持直接上传 .js 脚本，上传后自动用 Node.js 运行。
+                  上传后自动用 Node.js 运行，仅支持内置模块。
                   本地测试：
                 </p>
                 <code className="font-mono text-xs block mt-1">
                   node my_engine.js
-                </code>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="go">
-              <Code language="go">{goExample}</Code>
-              <div className="mt-3 p-3 bg-vermilion/5 border border-vermilion/10 rounded-lg text-sm text-ink-light">
-                <p className="font-semibold text-vermilion mb-1">
-                  编译 & 运行
-                </p>
-                <code className="font-mono text-xs">
-                  go build -o my_engine my_engine.go
                 </code>
               </div>
             </TabsContent>

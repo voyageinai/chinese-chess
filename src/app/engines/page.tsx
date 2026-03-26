@@ -57,7 +57,7 @@ export default function EnginesPage() {
         }
 
         setAuthenticated(true);
-        const engRes = await fetch("/api/engines?scope=owned");
+        const engRes = await fetch("/api/engines?scope=owned&status=active");
         if (engRes.ok) {
           const data = await engRes.json();
           setEngines(data.engines ?? []);
@@ -214,7 +214,7 @@ export default function EnginesPage() {
             上传引擎
           </CardTitle>
           <CardDescription>
-            上传 UCI 协议兼容的象棋引擎（二进制文件或 .py/.js 脚本）。上传后自动校验 UCI 握手，通过后对全站公开可用。
+            上传 UCI 协议兼容的象棋引擎（二进制可执行文件、.py 或 .js 脚本均可）。上传后自动校验 UCI 握手及坐标系兼容性，通过后对全站公开可用。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -236,6 +236,7 @@ export default function EnginesPage() {
                   id="engineFile"
                   ref={fileInputRef}
                   type="file"
+                  accept=".py,.js,.exe,*"
                   onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                   required
                 />

@@ -60,7 +60,7 @@ function parseRawUciMove(uci: string): {
  * Determine how to spawn an engine based on file extension.
  * .py  → python3 <path>
  * .js  → node <path>
- * else → execute directly as binary
+ * else → execute directly as native binary
  */
 function resolveSpawnArgs(enginePath: string): { cmd: string; args: string[] } {
   const ext = path.extname(enginePath).toLowerCase();

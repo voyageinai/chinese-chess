@@ -10,8 +10,8 @@ import {
   getEnginesByUser,
   getVisibleEngines,
   getEngineById,
-  deleteEngine,
-  isEngineReferenced,
+  softDeleteEngine,
+  isEngineInRunningTournament,
   updateEngineElo,
   updateEngineStatus,
   getLeaderboard,
@@ -96,11 +96,21 @@ describe("Engines", () => {
     expect(visible[0].id).toBe(engine.id);
   });
 
-  it("deletes an engine", () => {
+  it("soft-deletes an engine (sets status to disabled)", () => {
     const user = createUser("alice", "hashedpw1");
     const engine = createEngine(user.id, "PikafishV1", "/bin/pikafish");
-    deleteEngine(engine.id);
-    expect(getEngineById(engine.id)).toBeUndefined();
+    softDeleteEngine(engine.id);
+    const deleted = getEngineById(engine.id);
+    expect(deleted).toBeDefined();
+    expect(deleted!.status).toBe("disabled");
+  });
+
+  it("soft-deleted engine disappears from leaderboard but remains queryable", () => {
+    const user = createUser("alice", "hashedpw1");
+    const engine = createEngine(user.id, "PikafishV1", "/bin/pikafish");
+    softDeleteEngine(engine.id);
+    expect(getLeaderboard()).toHaveLength(0);
+    expect(getEngineById(engine.id)).toBeDefined();
   });
 
   it("updates engine elo", () => {
@@ -146,16 +156,27 @@ describe("Engines", () => {
     expect(all).toHaveLength(2);
   });
 
-  it("marks engines as referenced once they are used in a tournament", () => {
+  it("only blocks deletion for engines in running tournaments", () => {
     const user = createUser("alice", "hashedpw1");
     const engine = createEngine(user.id, "PikafishV1", "/bin/pikafish");
     const opponent = createEngine(user.id, "PikafishV2", "/bin/pikafish2");
     const tournament = createTournament(user.id, "Cup", 60, 0);
 
-    expect(isEngineReferenced(engine.id)).toBe(false);
+    // Not in any tournament
+    expect(isEngineInRunningTournament(engine.id)).toBe(false);
+
+    // In a pending tournament — should NOT block
     addEngineToTournament(tournament.id, engine.id);
     addEngineToTournament(tournament.id, opponent.id);
-    expect(isEngineReferenced(engine.id)).toBe(true);
+    expect(isEngineInRunningTournament(engine.id)).toBe(false);
+
+    // In a running tournament — should block
+    updateTournamentStatus(tournament.id, "running");
+    expect(isEngineInRunningTournament(engine.id)).toBe(true);
+
+    // Tournament finished — should NOT block
+    updateTournamentStatus(tournament.id, "finished");
+    expect(isEngineInRunningTournament(engine.id)).toBe(false);
   });
 });
 
