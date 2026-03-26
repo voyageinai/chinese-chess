@@ -115,25 +115,25 @@ export function getEngineById(id: string): Engine | undefined {
     .get(id) as Engine | undefined;
 }
 
-export function isEngineReferenced(id: string): boolean {
+export function isEngineInRunningTournament(id: string): boolean {
   const db = getDb();
   const row = db
     .prepare(
       `
         SELECT EXISTS(
-          SELECT 1 FROM tournament_entries WHERE engine_id = ?
-          UNION ALL
-          SELECT 1 FROM games WHERE red_engine_id = ? OR black_engine_id = ?
+          SELECT 1 FROM tournament_entries te
+          JOIN tournaments t ON te.tournament_id = t.id
+          WHERE te.engine_id = ? AND t.status = 'running'
         ) as in_use
       `,
     )
-    .get(id, id, id) as { in_use: number };
+    .get(id) as { in_use: number };
   return row.in_use === 1;
 }
 
-export function deleteEngine(id: string): void {
+export function softDeleteEngine(id: string): void {
   const db = getDb();
-  db.prepare("DELETE FROM engines WHERE id = ?").run(id);
+  db.prepare("UPDATE engines SET status = 'disabled' WHERE id = ?").run(id);
 }
 
 export function updateEngineElo(
@@ -417,6 +417,26 @@ export function getActiveGames(): Game[] {
       "SELECT * FROM games WHERE started_at IS NOT NULL AND finished_at IS NULL",
     )
     .all() as Game[];
+}
+
+/** Find one unstarted game from a running tournament for worker dispatch. */
+export function pollUnstartedGame(
+  excludeGameIds: string[],
+): Game | undefined {
+  const db = getDb();
+  const placeholders = excludeGameIds.length
+    ? `AND g.id NOT IN (${excludeGameIds.map(() => "?").join(",")})`
+    : "";
+  return db
+    .prepare(
+      `SELECT g.* FROM games g
+       JOIN tournaments t ON g.tournament_id = t.id
+       WHERE g.started_at IS NULL AND g.result IS NULL
+         AND t.status = 'running'
+         ${placeholders}
+       ORDER BY g.ROWID ASC LIMIT 1`,
+    )
+    .get(...excludeGameIds) as Game | undefined;
 }
 
 // ── User Management ───────────────────────────────────────────────────

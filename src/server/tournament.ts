@@ -11,6 +11,8 @@ import type { WsHub } from "./ws";
 import { createStrategy } from "./strategies";
 import type { RoundContext, Standing, BracketData } from "./strategies";
 import { KnockoutStrategy } from "./strategies";
+import { isDistributedEnabled } from "./distributed/auth";
+import type { ResultReport } from "./distributed/types";
 
 // ---------------------------------------------------------------------------
 // Pairing generation
@@ -125,10 +127,14 @@ export class TournamentRunner extends EventEmitter {
   private tournamentId: string;
   private aborted = false;
 
+  // Instance-level engine and score maps, accessible by applyRemoteResult
+  private engines = new Map<string, Engine>();
+  private scores = new Map<string, number>();
+
   // ── Elo mutex — prevents concurrent Elo read-modify-write races ──────────
   private static eloMutex = { locked: false, queue: [] as (() => void)[] };
 
-  private static async withEloLock<T>(fn: () => T): Promise<T> {
+  static async withEloLock<T>(fn: () => T): Promise<T> {
     while (TournamentRunner.eloMutex.locked) {
       await new Promise<void>((resolve) =>
         TournamentRunner.eloMutex.queue.push(resolve),
@@ -150,6 +156,81 @@ export class TournamentRunner extends EventEmitter {
   }
 
   /**
+   * Apply a game result reported by a remote worker.
+   * Updates Elo, scores, and emits game_end — same logic as runOneGame post-match.
+   */
+  applyRemoteResult(gameId: string, report: ResultReport): void {
+    const game = queries.getGameById(gameId);
+    if (!game) return;
+
+    // Emit game_end event → WebSocket broadcast
+    this.emit("game_end", {
+      type: "game_end",
+      gameId,
+      result: report.result,
+      code: report.code,
+      reason: report.reason,
+      detail: report.detail,
+    });
+
+    // Elo and score update (synchronous, inside lock handled by caller or inline)
+    // Use a non-async path since this is called from an API route
+    const redEngineData = this.engines.get(game.red_engine_id);
+    const blackEngineData = this.engines.get(game.black_engine_id);
+    if (!redEngineData || !blackEngineData) return;
+
+    const scoreA =
+      report.result === "red" ? 1 : report.result === "black" ? 0 : 0.5;
+
+    const [newRedElo, newBlackElo] = calculateElo(
+      redEngineData.elo,
+      blackEngineData.elo,
+      scoreA,
+      redEngineData.games_played,
+      blackEngineData.games_played,
+    );
+
+    redEngineData.elo = Math.round(newRedElo);
+    redEngineData.games_played++;
+    queries.updateEngineElo(game.red_engine_id, redEngineData.elo, redEngineData.games_played, {
+      wins: report.result === "red" ? 1 : 0,
+      losses: report.result === "black" ? 1 : 0,
+      draws: report.result === "draw" ? 1 : 0,
+    });
+
+    blackEngineData.elo = Math.round(newBlackElo);
+    blackEngineData.games_played++;
+    queries.updateEngineElo(game.black_engine_id, blackEngineData.elo, blackEngineData.games_played, {
+      wins: report.result === "black" ? 1 : 0,
+      losses: report.result === "red" ? 1 : 0,
+      draws: report.result === "draw" ? 1 : 0,
+    });
+
+    queries.recordEloSnapshot(game.red_engine_id, redEngineData.elo, gameId);
+    queries.recordEloSnapshot(game.black_engine_id, blackEngineData.elo, gameId);
+
+    // Update tournament scores
+    const redScore = this.scores.get(game.red_engine_id) ?? 0;
+    const blackScore = this.scores.get(game.black_engine_id) ?? 0;
+    if (report.result === "red") {
+      this.scores.set(game.red_engine_id, redScore + 1);
+    } else if (report.result === "black") {
+      this.scores.set(game.black_engine_id, blackScore + 1);
+    } else {
+      this.scores.set(game.red_engine_id, redScore + 0.5);
+      this.scores.set(game.black_engine_id, blackScore + 0.5);
+    }
+
+    queries.updateTournamentEntry(this.tournamentId, game.red_engine_id, this.scores.get(game.red_engine_id)!);
+    queries.updateTournamentEntry(this.tournamentId, game.black_engine_id, this.scores.get(game.black_engine_id)!);
+  }
+
+  /** Emit an event from a remote worker (move, thinking, game_start, etc.) for WebSocket broadcast. */
+  emitRemoteEvent(event: string, data: Record<string, unknown>): void {
+    this.emit(event, data);
+  }
+
+  /**
    * Run a single game from start to finish, updating the DB, Elo ratings,
    * tournament scores, and emitting WebSocket events.
    *
@@ -165,13 +246,11 @@ export class TournamentRunner extends EventEmitter {
       opening_fen: string | null;
       result?: string | null;
     },
-    engines: Map<string, Engine>,
-    scores: Map<string, number>,
     tournament: Tournament,
   ): Promise<void> {
     const gameId = game.id;
-    const redEngine = engines.get(game.red_engine_id)!;
-    const blackEngine = engines.get(game.black_engine_id)!;
+    const redEngine = this.engines.get(game.red_engine_id)!;
+    const blackEngine = this.engines.get(game.black_engine_id)!;
 
     const initialTimeMs = tournament.time_control_base * 1000;
 
@@ -241,12 +320,10 @@ export class TournamentRunner extends EventEmitter {
 
     // Update Elo ratings and tournament scores (mutex-protected for concurrent safety)
     await TournamentRunner.withEloLock(() => {
-      const redEngineData = engines.get(game.red_engine_id)!;
-      const blackEngineData = engines.get(game.black_engine_id)!;
+      const redEngineData = this.engines.get(game.red_engine_id)!;
+      const blackEngineData = this.engines.get(game.black_engine_id)!;
 
-      // Re-read current Elo values from in-memory cache (may have been updated
-      // by another game that finished while this one was playing).
-      let scoreA: number; // red's score
+      let scoreA: number;
       if (result.result === "red") {
         scoreA = 1;
       } else if (result.result === "black") {
@@ -263,7 +340,6 @@ export class TournamentRunner extends EventEmitter {
         blackEngineData.games_played,
       );
 
-      // Update engine Elo and W/L/D in DB and local cache
       redEngineData.elo = Math.round(newRedElo);
       redEngineData.games_played++;
       const redDelta = {
@@ -292,33 +368,30 @@ export class TournamentRunner extends EventEmitter {
         blackDelta,
       );
 
-      // Record Elo history snapshots (new Elo values already assigned above)
       queries.recordEloSnapshot(game.red_engine_id, redEngineData.elo, gameId);
       queries.recordEloSnapshot(game.black_engine_id, blackEngineData.elo, gameId);
 
-      // Update tournament scores (inside the lock — shared mutable map)
-      const redScore = scores.get(game.red_engine_id)!;
-      const blackScore = scores.get(game.black_engine_id)!;
+      const redScore = this.scores.get(game.red_engine_id)!;
+      const blackScore = this.scores.get(game.black_engine_id)!;
 
       if (result.result === "red") {
-        scores.set(game.red_engine_id, redScore + 1);
+        this.scores.set(game.red_engine_id, redScore + 1);
       } else if (result.result === "black") {
-        scores.set(game.black_engine_id, blackScore + 1);
+        this.scores.set(game.black_engine_id, blackScore + 1);
       } else {
-        scores.set(game.red_engine_id, redScore + 0.5);
-        scores.set(game.black_engine_id, blackScore + 0.5);
+        this.scores.set(game.red_engine_id, redScore + 0.5);
+        this.scores.set(game.black_engine_id, blackScore + 0.5);
       }
 
-      // Persist updated entry scores to DB
       queries.updateTournamentEntry(
         this.tournamentId,
         game.red_engine_id,
-        scores.get(game.red_engine_id)!,
+        this.scores.get(game.red_engine_id)!,
       );
       queries.updateTournamentEntry(
         this.tournamentId,
         game.black_engine_id,
-        scores.get(game.black_engine_id)!,
+        this.scores.get(game.black_engine_id)!,
       );
     });
 
@@ -335,23 +408,47 @@ export class TournamentRunner extends EventEmitter {
 
   private async runGamesWithConcurrency(
     games: Game[],
-    engines: Map<string, Engine>,
-    scores: Map<string, number>,
     tournament: Tournament,
   ): Promise<void> {
-    const promises = games
-      .filter((g) => !g.result)
-      .map(async (game) => {
+    const unfinished = games.filter((g) => !g.result);
+    if (unfinished.length === 0) return;
+
+    const distributed = isDistributedEnabled();
+
+    const promises = unfinished.map(async (game) => {
+      if (this.aborted) return;
+      await globalMatchSemaphore.acquire();
+      try {
         if (this.aborted) return;
-        await globalMatchSemaphore.acquire();
-        try {
-          if (this.aborted) return;
-          await this.runOneGame(game, engines, scores, tournament);
-        } finally {
-          globalMatchSemaphore.release();
+        // In distributed mode, skip games already claimed by a worker
+        if (distributed) {
+          const fresh = queries.getGameById(game.id);
+          if (fresh?.result || fresh?.started_at) return;
         }
-      });
+        await this.runOneGame(game, tournament);
+      } finally {
+        globalMatchSemaphore.release();
+      }
+    });
     await Promise.all(promises);
+
+    // In distributed mode, wait for worker-executed games to complete
+    if (distributed) {
+      await this.waitForAllGamesComplete(unfinished.map((g) => g.id));
+    }
+  }
+
+  /** Poll DB until all given games have results (for worker-dispatched games). */
+  private async waitForAllGamesComplete(gameIds: string[]): Promise<void> {
+    const POLL_INTERVAL = 2000;
+    while (!this.aborted) {
+      const allDone = gameIds.every((id) => {
+        const g = queries.getGameById(id);
+        return g?.result != null;
+      });
+      if (allDone) break;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+    }
   }
 
   private computeScores(games: Game[], engineIds: string[]): Map<string, number> {
@@ -387,14 +484,14 @@ export class TournamentRunner extends EventEmitter {
       throw new Error("Tournament needs at least 2 engines");
     }
 
-    // Build engine lookup (id -> Engine)
-    const engines = new Map<string, Engine>();
+    // Build engine lookup (id -> Engine) on instance for distributed access
+    this.engines = new Map<string, Engine>();
     for (const eid of engineIds) {
       const engine = queries.getEngineById(eid);
       if (!engine) {
         throw new Error(`Engine ${eid} not found`);
       }
-      engines.set(eid, engine);
+      this.engines.set(eid, engine);
     }
 
     const openingFens = loadOpeningFens();
@@ -406,10 +503,10 @@ export class TournamentRunner extends EventEmitter {
 
     if (strategy instanceof KnockoutStrategy) {
       // --- Bracket-based execution (knockout) ---
-      await this.runBracketKnockout(strategy, engineIds, engines, tournament, openingFens, existingGames);
+      await this.runBracketKnockout(strategy, engineIds, tournament, openingFens, existingGames);
     } else if (strategy.isRoundBased()) {
       // --- Round-based execution (swiss) ---
-      await this.runRoundBased(strategy, engineIds, engines, tournament, openingFens, existingGames);
+      await this.runRoundBased(strategy, engineIds, tournament, openingFens, existingGames);
     } else {
       // --- Batch execution (round_robin, gauntlet) ---
       if (existingGames.length === 0) {
@@ -427,12 +524,12 @@ export class TournamentRunner extends EventEmitter {
         existingGames = queries.getGamesByTournament(this.tournamentId);
       }
 
-      const scores = this.computeScores(existingGames, engineIds);
+      this.scores = this.computeScores(existingGames, engineIds);
 
-      await this.runGamesWithConcurrency(existingGames, engines, scores, tournament);
+      await this.runGamesWithConcurrency(existingGames, tournament);
 
       // Calculate final rankings
-      const sortedEntries = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+      const sortedEntries = [...this.scores.entries()].sort((a, b) => b[1] - a[1]);
       let rank = 1;
       for (let i = 0; i < sortedEntries.length; i++) {
         const [engineId, score] = sortedEntries[i];
@@ -462,12 +559,11 @@ export class TournamentRunner extends EventEmitter {
   private async runBracketKnockout(
     knockout: KnockoutStrategy,
     engineIds: string[],
-    engines: Map<string, Engine>,
     tournament: Tournament,
     openingFens: string[],
     existingGames: Game[],
   ): Promise<void> {
-    const scores = this.computeScores(existingGames, engineIds);
+    this.scores = this.computeScores(existingGames, engineIds);
 
     // Load or create bracket
     let bracket: BracketData;
@@ -476,8 +572,8 @@ export class TournamentRunner extends EventEmitter {
     } else {
       // Seed by Elo descending — strongest engine = seed 1
       const seededIds = [...engineIds].sort((a, b) => {
-        const eloA = engines.get(a)?.elo ?? 0;
-        const eloB = engines.get(b)?.elo ?? 0;
+        const eloA = this.engines.get(a)?.elo ?? 0;
+        const eloB = this.engines.get(b)?.elo ?? 0;
         return eloB - eloA;
       });
       bracket = knockout.initBracket(seededIds);
@@ -576,7 +672,7 @@ export class TournamentRunner extends EventEmitter {
         .filter((g) => g && !g.result);
 
       if (gamesToRun.length > 0) {
-        await this.runGamesWithConcurrency(gamesToRun, engines, scores, tournament);
+        await this.runGamesWithConcurrency(gamesToRun, tournament);
       }
 
       // Resolve completed matches and propagate winners
@@ -604,7 +700,7 @@ export class TournamentRunner extends EventEmitter {
     // Final rankings from bracket
     const rankings = knockout.getRankings(bracket);
     for (const [engineId, rank] of rankings) {
-      const score = scores.get(engineId) ?? 0;
+      const score = this.scores.get(engineId) ?? 0;
       queries.updateTournamentEntry(this.tournamentId, engineId, score, rank);
     }
   }
@@ -616,12 +712,11 @@ export class TournamentRunner extends EventEmitter {
   private async runRoundBased(
     strategy: { generateNextRound?(context: RoundContext): Pairing[] | null },
     engineIds: string[],
-    engines: Map<string, Engine>,
     tournament: Tournament,
     openingFens: string[],
     existingGames: Game[],
   ): Promise<void> {
-    const scores = this.computeScores(existingGames, engineIds);
+    this.scores = this.computeScores(existingGames, engineIds);
     const totalRounds = tournament.rounds;
 
     let currentRound = 1;
@@ -645,7 +740,7 @@ export class TournamentRunner extends EventEmitter {
 
         const standings: Standing[] = engineIds.map((eid) => ({
           engineId: eid,
-          score: scores.get(eid) ?? 0,
+          score: this.scores.get(eid) ?? 0,
           wins: completedGames.filter((g) => (g.redId === eid && g.result === "red") || (g.blackId === eid && g.result === "black")).length,
           losses: completedGames.filter((g) => (g.redId === eid && g.result === "black") || (g.blackId === eid && g.result === "red")).length,
           draws: completedGames.filter((g) => (g.redId === eid || g.blackId === eid) && g.result === "draw").length,
@@ -672,15 +767,15 @@ export class TournamentRunner extends EventEmitter {
         roundGames = existingGames.filter((g) => !g.result);
       }
 
-      await this.runGamesWithConcurrency(roundGames, engines, scores, tournament);
+      await this.runGamesWithConcurrency(roundGames, tournament);
 
       existingGames = queries.getGamesByTournament(this.tournamentId);
       const updatedScores = this.computeScores(existingGames, engineIds);
-      for (const [k, v] of updatedScores) scores.set(k, v);
+      for (const [k, v] of updatedScores) this.scores.set(k, v);
     }
 
     // Final rankings
-    const sortedEntries = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+    const sortedEntries = [...this.scores.entries()].sort((a, b) => b[1] - a[1]);
     let rank = 1;
     for (let i = 0; i < sortedEntries.length; i++) {
       const [engineId, score] = sortedEntries[i];

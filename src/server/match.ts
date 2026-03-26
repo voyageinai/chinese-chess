@@ -31,6 +31,7 @@ export interface MatchConfig {
   timeInc: number; // ms
   gameId: string;
   startFen?: string;
+  skipDbWrites?: boolean; // Worker mode: don't write to DB directly
 }
 
 export interface MatchResult {
@@ -272,7 +273,9 @@ export class Match extends EventEmitter {
         storedMoves.push(storedMove);
 
         // Persist moves incrementally so new viewers see current state
-        updateGameMoves(gameId, JSON.stringify(storedMoves), redTime, blackTime);
+        if (!this.config.skipDbWrites) {
+          updateGameMoves(gameId, JSON.stringify(storedMoves), redTime, blackTime);
+        }
 
         // Emit move event for WebSocket
         // movedAt lets the client compensate for network delay
