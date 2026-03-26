@@ -100,6 +100,7 @@ export interface Tournament {
   created_at: number;
   finished_at: number | null;
   bracket_data: string | null;
+  sandbox: number; // 0 = normal, 1 = sandbox (no Elo, auto-cleanup)
 }
 
 export interface TournamentEntry {

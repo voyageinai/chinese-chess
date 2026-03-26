@@ -136,6 +136,11 @@ export function softDeleteEngine(id: string): void {
   db.prepare("UPDATE engines SET status = 'disabled' WHERE id = ?").run(id);
 }
 
+export function hardDeleteEngine(id: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM engines WHERE id = ?").run(id);
+}
+
 export function updateEngineElo(
   id: string,
   newElo: number,
@@ -229,13 +234,14 @@ export function createTournament(
   rounds: number = 1,
   type: "tournament" | "quick_match" = "tournament",
   format: "round_robin" | "knockout" | "gauntlet" | "swiss" = "round_robin",
+  sandbox: boolean = false,
 ): Tournament {
   const db = getDb();
   const id = nanoid();
 
   db.prepare(
-    "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds, type, format) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds, type, format);
+    "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds, type, format, sandbox) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds, type, format, sandbox ? 1 : 0);
 
   return getTournamentById(id)!;
 }
@@ -243,8 +249,25 @@ export function createTournament(
 export function getTournaments(): Tournament[] {
   const db = getDb();
   return db
-    .prepare("SELECT * FROM tournaments ORDER BY created_at DESC")
+    .prepare("SELECT * FROM tournaments WHERE sandbox = 0 ORDER BY created_at DESC")
     .all() as Tournament[];
+}
+
+/** Delete a sandbox tournament and all its games, entries, and elo_history. */
+export function deleteSandboxTournament(tournamentId: string): void {
+  const db = getDb();
+  db.transaction(() => {
+    // Delete elo history for games in this tournament
+    db.prepare(
+      "DELETE FROM elo_history WHERE game_id IN (SELECT id FROM games WHERE tournament_id = ?)",
+    ).run(tournamentId);
+    // Delete games
+    db.prepare("DELETE FROM games WHERE tournament_id = ?").run(tournamentId);
+    // Delete entries
+    db.prepare("DELETE FROM tournament_entries WHERE tournament_id = ?").run(tournamentId);
+    // Delete tournament
+    db.prepare("DELETE FROM tournaments WHERE id = ?").run(tournamentId);
+  })();
 }
 
 export function getTournamentById(id: string): Tournament | undefined {

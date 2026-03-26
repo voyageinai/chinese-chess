@@ -126,6 +126,7 @@ export function getActiveRunners(): Map<string, TournamentRunner> {
 export class TournamentRunner extends EventEmitter {
   private tournamentId: string;
   private aborted = false;
+  private sandbox = false;
 
   // Instance-level engine and score maps, accessible by applyRemoteResult
   private engines = new Map<string, Engine>();
@@ -173,43 +174,33 @@ export class TournamentRunner extends EventEmitter {
       detail: report.detail,
     });
 
-    // Elo and score update (synchronous, inside lock handled by caller or inline)
-    // Use a non-async path since this is called from an API route
-    const redEngineData = this.engines.get(game.red_engine_id);
-    const blackEngineData = this.engines.get(game.black_engine_id);
-    if (!redEngineData || !blackEngineData) return;
+    // Elo update — skip for sandbox
+    if (!this.sandbox) {
+      const redEngineData = this.engines.get(game.red_engine_id);
+      const blackEngineData = this.engines.get(game.black_engine_id);
+      if (redEngineData && blackEngineData) {
+        const scoreA =
+          report.result === "red" ? 1 : report.result === "black" ? 0 : 0.5;
+        const [newRedElo, newBlackElo] = calculateElo(
+          redEngineData.elo, blackEngineData.elo, scoreA,
+          redEngineData.games_played, blackEngineData.games_played,
+        );
+        redEngineData.elo = Math.round(newRedElo);
+        redEngineData.games_played++;
+        queries.updateEngineElo(game.red_engine_id, redEngineData.elo, redEngineData.games_played, {
+          wins: report.result === "red" ? 1 : 0, losses: report.result === "black" ? 1 : 0, draws: report.result === "draw" ? 1 : 0,
+        });
+        blackEngineData.elo = Math.round(newBlackElo);
+        blackEngineData.games_played++;
+        queries.updateEngineElo(game.black_engine_id, blackEngineData.elo, blackEngineData.games_played, {
+          wins: report.result === "black" ? 1 : 0, losses: report.result === "red" ? 1 : 0, draws: report.result === "draw" ? 1 : 0,
+        });
+        queries.recordEloSnapshot(game.red_engine_id, redEngineData.elo, gameId);
+        queries.recordEloSnapshot(game.black_engine_id, blackEngineData.elo, gameId);
+      }
+    }
 
-    const scoreA =
-      report.result === "red" ? 1 : report.result === "black" ? 0 : 0.5;
-
-    const [newRedElo, newBlackElo] = calculateElo(
-      redEngineData.elo,
-      blackEngineData.elo,
-      scoreA,
-      redEngineData.games_played,
-      blackEngineData.games_played,
-    );
-
-    redEngineData.elo = Math.round(newRedElo);
-    redEngineData.games_played++;
-    queries.updateEngineElo(game.red_engine_id, redEngineData.elo, redEngineData.games_played, {
-      wins: report.result === "red" ? 1 : 0,
-      losses: report.result === "black" ? 1 : 0,
-      draws: report.result === "draw" ? 1 : 0,
-    });
-
-    blackEngineData.elo = Math.round(newBlackElo);
-    blackEngineData.games_played++;
-    queries.updateEngineElo(game.black_engine_id, blackEngineData.elo, blackEngineData.games_played, {
-      wins: report.result === "black" ? 1 : 0,
-      losses: report.result === "red" ? 1 : 0,
-      draws: report.result === "draw" ? 1 : 0,
-    });
-
-    queries.recordEloSnapshot(game.red_engine_id, redEngineData.elo, gameId);
-    queries.recordEloSnapshot(game.black_engine_id, blackEngineData.elo, gameId);
-
-    // Update tournament scores
+    // Tournament scores — always tracked
     const redScore = this.scores.get(game.red_engine_id) ?? 0;
     const blackScore = this.scores.get(game.black_engine_id) ?? 0;
     if (report.result === "red") {
@@ -320,59 +311,63 @@ export class TournamentRunner extends EventEmitter {
 
     // Update Elo ratings and tournament scores (mutex-protected for concurrent safety)
     await TournamentRunner.withEloLock(() => {
-      const redEngineData = this.engines.get(game.red_engine_id)!;
-      const blackEngineData = this.engines.get(game.black_engine_id)!;
+      // Elo/W-L-D updates — skip for sandbox tournaments
+      if (!this.sandbox) {
+        const redEngineData = this.engines.get(game.red_engine_id)!;
+        const blackEngineData = this.engines.get(game.black_engine_id)!;
 
-      let scoreA: number;
-      if (result.result === "red") {
-        scoreA = 1;
-      } else if (result.result === "black") {
-        scoreA = 0;
-      } else {
-        scoreA = 0.5;
+        let scoreA: number;
+        if (result.result === "red") {
+          scoreA = 1;
+        } else if (result.result === "black") {
+          scoreA = 0;
+        } else {
+          scoreA = 0.5;
+        }
+
+        const [newRedElo, newBlackElo] = calculateElo(
+          redEngineData.elo,
+          blackEngineData.elo,
+          scoreA,
+          redEngineData.games_played,
+          blackEngineData.games_played,
+        );
+
+        redEngineData.elo = Math.round(newRedElo);
+        redEngineData.games_played++;
+        const redDelta = {
+          wins: result.result === "red" ? 1 : 0,
+          losses: result.result === "black" ? 1 : 0,
+          draws: result.result === "draw" ? 1 : 0,
+        };
+        queries.updateEngineElo(
+          game.red_engine_id,
+          redEngineData.elo,
+          redEngineData.games_played,
+          redDelta,
+        );
+
+        blackEngineData.elo = Math.round(newBlackElo);
+        blackEngineData.games_played++;
+        const blackDelta = {
+          wins: result.result === "black" ? 1 : 0,
+          losses: result.result === "red" ? 1 : 0,
+          draws: result.result === "draw" ? 1 : 0,
+        };
+        queries.updateEngineElo(
+          game.black_engine_id,
+          blackEngineData.elo,
+          blackEngineData.games_played,
+          blackDelta,
+        );
+
+        queries.recordEloSnapshot(game.red_engine_id, redEngineData.elo, gameId);
+        queries.recordEloSnapshot(game.black_engine_id, blackEngineData.elo, gameId);
       }
 
-      const [newRedElo, newBlackElo] = calculateElo(
-        redEngineData.elo,
-        blackEngineData.elo,
-        scoreA,
-        redEngineData.games_played,
-        blackEngineData.games_played,
-      );
-
-      redEngineData.elo = Math.round(newRedElo);
-      redEngineData.games_played++;
-      const redDelta = {
-        wins: result.result === "red" ? 1 : 0,
-        losses: result.result === "black" ? 1 : 0,
-        draws: result.result === "draw" ? 1 : 0,
-      };
-      queries.updateEngineElo(
-        game.red_engine_id,
-        redEngineData.elo,
-        redEngineData.games_played,
-        redDelta,
-      );
-
-      blackEngineData.elo = Math.round(newBlackElo);
-      blackEngineData.games_played++;
-      const blackDelta = {
-        wins: result.result === "black" ? 1 : 0,
-        losses: result.result === "red" ? 1 : 0,
-        draws: result.result === "draw" ? 1 : 0,
-      };
-      queries.updateEngineElo(
-        game.black_engine_id,
-        blackEngineData.elo,
-        blackEngineData.games_played,
-        blackDelta,
-      );
-
-      queries.recordEloSnapshot(game.red_engine_id, redEngineData.elo, gameId);
-      queries.recordEloSnapshot(game.black_engine_id, blackEngineData.elo, gameId);
-
-      const redScore = this.scores.get(game.red_engine_id)!;
-      const blackScore = this.scores.get(game.black_engine_id)!;
+      // Tournament scores — always tracked (needed for rankings/CLI output)
+      const redScore = this.scores.get(game.red_engine_id) ?? 0;
+      const blackScore = this.scores.get(game.black_engine_id) ?? 0;
 
       if (result.result === "red") {
         this.scores.set(game.red_engine_id, redScore + 1);
@@ -489,6 +484,9 @@ export class TournamentRunner extends EventEmitter {
       throw new Error(`Tournament ${this.tournamentId} not found`);
     }
 
+    // Track sandbox mode
+    this.sandbox = !!tournament.sandbox;
+
     // Mark tournament as running
     queries.updateTournamentStatus(this.tournamentId, "running");
 
@@ -566,6 +564,25 @@ export class TournamentRunner extends EventEmitter {
 
     // Emit tournament_end
     this.emit("tournament_end", { type: "tournament_end", tournamentId: this.tournamentId });
+
+    // Sandbox auto-cleanup: delete all games, entries, and the tournament itself
+    if (this.sandbox) {
+      console.log(`[sandbox] Cleaning up sandbox tournament ${this.tournamentId}`);
+      // Also remove sandbox engine files
+      for (const engine of this.engines.values()) {
+        if (engine.user_id === "__sandbox__") {
+          try {
+            const engineDir = path.dirname(engine.binary_path);
+            fs.rmSync(engineDir, { recursive: true, force: true });
+            queries.hardDeleteEngine(engine.id);
+          } catch (err) {
+            console.error(`[sandbox] Failed to clean engine ${engine.id}:`, err);
+          }
+        }
+      }
+      queries.deleteSandboxTournament(this.tournamentId);
+      console.log(`[sandbox] Cleanup complete for ${this.tournamentId}`);
+    }
   }
 
   // ---------------------------------------------------------------------------

@@ -195,6 +195,11 @@ function runMigrations(database: Database.Database): void {
   if (!hasColumn(database, "tournaments", "bracket_data")) {
     database.exec("ALTER TABLE tournaments ADD COLUMN bracket_data TEXT");
   }
+
+  // -- v9: Sandbox mode for CLI testing --
+  if (!hasColumn(database, "tournaments", "sandbox")) {
+    database.exec("ALTER TABLE tournaments ADD COLUMN sandbox INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 function seedDefaultEngines(database: Database.Database): void {
