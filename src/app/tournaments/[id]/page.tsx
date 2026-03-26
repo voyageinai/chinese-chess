@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { CrossTable } from "@/components/CrossTable";
+import { BracketView } from "@/components/BracketView";
+import { SwissStandings } from "@/components/SwissStandings";
+import { GauntletSummary } from "@/components/GauntletSummary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +31,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Play, Plus, RotateCcw } from "lucide-react";
+import { translateResult } from "@/lib/results";
+import type { ResultCode } from "@/lib/types";
 
 interface Tournament {
   id: string;
@@ -63,13 +68,33 @@ interface GameRecord {
   red_engine_id: string;
   black_engine_id: string;
   result: "red" | "black" | "draw" | null;
+  result_code: ResultCode | null;
+  result_reason: string | null;
+  result_detail: string | null;
   started_at: number | null;
   finished_at: number | null;
+  round: number | null;
 }
 
 interface EngineInfo {
   id: string;
   name: string;
+}
+
+interface BracketViewBracketData {
+  bracketSize: number;
+  totalRounds: number;
+  seeds: string[];
+  matches: {
+    round: number;
+    position: number;
+    engineA: string | null;
+    engineB: string | null;
+    winner: string | null;
+    isBye: boolean;
+    tiebreak: boolean;
+    gameIds: string[];
+  }[];
 }
 
 interface CurrentUser {
@@ -90,6 +115,127 @@ const RESULT_LABELS: Record<string, string> = {
   draw: "和棋",
 };
 
+const ROUND_LABELS: Record<number, string> = {};
+function getRoundLabel(round: number): string {
+  return ROUND_LABELS[round] || `第 ${round} 轮`;
+}
+
+function GamesListByRound({
+  games,
+  engineMap,
+}: {
+  games: GameRecord[];
+  engineMap: Record<string, string>;
+}) {
+  const hasRounds = games.some((g) => g.round != null);
+
+  if (!hasRounds) {
+    return <GamesTable games={games} engineMap={engineMap} />;
+  }
+
+  // Group by round
+  const roundMap = new Map<number, GameRecord[]>();
+  const noRound: GameRecord[] = [];
+  for (const g of games) {
+    if (g.round != null) {
+      if (!roundMap.has(g.round)) roundMap.set(g.round, []);
+      roundMap.get(g.round)!.push(g);
+    } else {
+      noRound.push(g);
+    }
+  }
+
+  const sortedRounds = [...roundMap.keys()].sort((a, b) => a - b);
+
+  return (
+    <div className="space-y-4">
+      {sortedRounds.map((round) => (
+        <div key={round}>
+          <h3 className="font-brush text-lg text-ink mb-2">{getRoundLabel(round)}</h3>
+          <GamesTable games={roundMap.get(round)!} engineMap={engineMap} />
+        </div>
+      ))}
+      {noRound.length > 0 && (
+        <div>
+          <h3 className="font-brush text-lg text-ink-muted mb-2">其他</h3>
+          <GamesTable games={noRound} engineMap={engineMap} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GamesTable({
+  games,
+  engineMap,
+}: {
+  games: GameRecord[];
+  engineMap: Record<string, string>;
+}) {
+  return (
+    <div className="rounded-lg border border-paper-300 bg-paper-50 overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="border-paper-300 hover:bg-transparent">
+            <TableHead className="text-ink-muted">红方</TableHead>
+            <TableHead className="text-ink-muted">黑方</TableHead>
+            <TableHead className="text-ink-muted">结果</TableHead>
+            <TableHead className="text-ink-muted">原因</TableHead>
+            <TableHead className="w-20" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {games.map((game) => (
+            <TableRow
+              key={game.id}
+              className="border-paper-300 hover:bg-paper-100/40"
+            >
+              <TableCell className="text-ink">
+                {engineMap[game.red_engine_id] ??
+                  game.red_engine_id.slice(0, 8)}
+              </TableCell>
+              <TableCell className="text-ink">
+                {engineMap[game.black_engine_id] ??
+                  game.black_engine_id.slice(0, 8)}
+              </TableCell>
+              <TableCell>
+                {game.result ? (
+                  <Badge
+                    variant={
+                      game.result === "draw" ? "secondary" : "outline"
+                    }
+                  >
+                    {RESULT_LABELS[game.result]}
+                  </Badge>
+                ) : (
+                  <span className="text-ink-muted text-sm">
+                    {game.started_at ? "进行中" : "待开始"}
+                  </span>
+                )}
+              </TableCell>
+              <TableCell className="text-sm text-ink-muted">
+                {translateResult(
+                  game.result_code,
+                  game.result_reason,
+                  game.result_detail,
+                ) || "-"}
+              </TableCell>
+              <TableCell>
+                <Link
+                  href={`/games/${game.id}`}
+                  className="text-sm text-ink-muted hover:text-ink underline"
+                >
+                  查看
+                </Link>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 function formatTimeControl(base: number, inc: number): string {
   const mins = Math.floor(base / 60);
   const secs = base % 60;
@@ -108,6 +254,7 @@ export default function TournamentDetailPage() {
   const [engineMap, setEngineMap] = useState<Record<string, string>>({});
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [userEngines, setUserEngines] = useState<EngineInfo[]>([]);
+  const [bracketData, setBracketData] = useState<BracketViewBracketData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -141,6 +288,7 @@ export default function TournamentDetailPage() {
         setTournament(tournData.tournament);
         setEntries(tournData.entries ?? []);
         setGames(tournData.games ?? []);
+        setBracketData(tournData.bracketData ?? null);
 
         // Build engine name map from entries
         const eMap: Record<string, string> = {};
@@ -349,7 +497,11 @@ export default function TournamentDetailPage() {
           {tournament.type !== "quick_match" && (
             <>&middot; {FORMAT_LABELS[tournament.format] || "循环赛"} </>
           )}
-          &middot; {tournament.rounds} 轮 &middot; 创建于{" "}
+          &middot;{" "}
+          {tournament.format === "knockout"
+            ? `每对 ${tournament.rounds * 2} 局`
+            : `${tournament.rounds} 轮`}
+          {" "}&middot; 创建于{" "}
           {new Date(tournament.created_at * 1000).toLocaleDateString("zh-CN")}
         </p>
       </div>
@@ -425,12 +577,38 @@ export default function TournamentDetailPage() {
         </Card>
       )}
 
-      {/* Cross Table */}
+      {/* Format-specific visualization */}
       {entries.length > 0 && (
-        <section>
-          <h2 className="font-brush text-2xl text-ink mb-4">交叉表</h2>
-          <CrossTable entries={crossEntries} games={games} />
-        </section>
+        <>
+          {tournament.format === "knockout" ? (
+            <BracketView
+              entries={crossEntries}
+              games={games}
+              engineMap={engineMap}
+              status={tournament.status}
+              bracketData={bracketData as BracketViewBracketData | null}
+            />
+          ) : tournament.format === "swiss" ? (
+            <SwissStandings
+              entries={crossEntries}
+              games={games}
+              engineMap={engineMap}
+              totalRounds={tournament.rounds}
+            />
+          ) : tournament.format === "gauntlet" ? (
+            <GauntletSummary
+              entries={crossEntries}
+              games={games}
+              engineMap={engineMap}
+            />
+          ) : (
+            /* round_robin — original cross table */
+            <section>
+              <h2 className="font-brush text-2xl text-ink mb-4">交叉表</h2>
+              <CrossTable entries={crossEntries} games={games} />
+            </section>
+          )}
+        </>
       )}
 
       {/* Engine Rankings */}
@@ -482,58 +660,7 @@ export default function TournamentDetailPage() {
       {games.length > 0 && (
         <section>
           <h2 className="font-brush text-2xl text-ink mb-4">对局列表</h2>
-          <div className="rounded-lg border border-paper-300 bg-paper-50 overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-paper-300 hover:bg-transparent">
-                  <TableHead className="text-ink-muted">红方</TableHead>
-                  <TableHead className="text-ink-muted">黑方</TableHead>
-                  <TableHead className="text-ink-muted">结果</TableHead>
-                  <TableHead className="w-20" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {games.map((game) => (
-                  <TableRow
-                    key={game.id}
-                    className="border-paper-300 hover:bg-paper-100/40"
-                  >
-                    <TableCell className="text-ink">
-                      {engineMap[game.red_engine_id] ??
-                        game.red_engine_id.slice(0, 8)}
-                    </TableCell>
-                    <TableCell className="text-ink">
-                      {engineMap[game.black_engine_id] ??
-                        game.black_engine_id.slice(0, 8)}
-                    </TableCell>
-                    <TableCell>
-                      {game.result ? (
-                        <Badge
-                          variant={
-                            game.result === "draw" ? "secondary" : "outline"
-                          }
-                        >
-                          {RESULT_LABELS[game.result]}
-                        </Badge>
-                      ) : (
-                        <span className="text-ink-muted text-sm">
-                          {game.started_at ? "进行中" : "待开始"}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        href={`/games/${game.id}`}
-                        className="text-sm text-ink-muted hover:text-ink underline"
-                      >
-                        查看
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <GamesListByRound games={games} engineMap={engineMap} />
         </section>
       )}
 

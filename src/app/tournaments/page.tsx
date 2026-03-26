@@ -75,6 +75,7 @@ export default function TournamentsPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<"all" | "running" | "finished">("all");
 
   // Create form state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -512,51 +513,84 @@ export default function TournamentsPage() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {tournaments.map((t) => (
-            <Link key={t.id} href={`/tournaments/${t.id}`}>
-              <Card className="hover:ring-2 hover:ring-paper-400 transition-all cursor-pointer h-full">
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between gap-2">
-                    <span className="truncate flex items-center gap-2">
-                      {t.type === "quick_match" && (
-                        <Badge variant="outline" className="text-xs shrink-0">
-                          快速对弈
-                        </Badge>
+        <>
+          {/* Status filter tabs */}
+          <div className="flex gap-1 rounded-lg border border-paper-300 bg-paper-50 p-1 w-fit">
+            {([
+              ["all", "全部"],
+              ["running", "进行中"],
+              ["finished", "已结束"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setStatusFilter(value)}
+                className={`px-3 py-1 rounded-md text-sm transition-all ${
+                  statusFilter === value
+                    ? "bg-paper-200 text-ink font-semibold shadow-sm"
+                    : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                {label}
+                <span className="ml-1 text-xs text-ink-muted">
+                  {value === "all"
+                    ? tournaments.length
+                    : tournaments.filter((t) => t.status === value).length}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {tournaments
+              .filter((t) => statusFilter === "all" || t.status === statusFilter)
+              .map((t) => (
+              <Link key={t.id} href={`/tournaments/${t.id}`}>
+                <Card className="hover:ring-2 hover:ring-paper-400 transition-all cursor-pointer h-full">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between gap-2">
+                      <span className="truncate flex items-center gap-2">
+                        {t.type === "quick_match" && (
+                          <Badge variant="outline" className="text-xs shrink-0">
+                            快速对弈
+                          </Badge>
+                        )}
+                        {t.name}
+                      </span>
+                      <Badge
+                        variant={
+                          t.status === "running"
+                            ? "default"
+                            : t.status === "finished"
+                              ? "secondary"
+                              : "outline"
+                        }
+                        className="shrink-0"
+                      >
+                        {STATUS_LABELS[t.status]}
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      {t.type !== "quick_match" && (
+                        <>{FORMAT_LABELS[t.format] || "循环赛"} &middot; </>
                       )}
-                      {t.name}
-                    </span>
-                    <Badge
-                      variant={
-                        t.status === "running"
-                          ? "default"
-                          : t.status === "finished"
-                            ? "secondary"
-                            : "outline"
-                      }
-                      className="shrink-0"
-                    >
-                      {STATUS_LABELS[t.status]}
-                    </Badge>
-                  </CardTitle>
-                  <CardDescription>
-                    {t.type !== "quick_match" && (
-                      <>{FORMAT_LABELS[t.format] || "循环赛"} &middot; </>
-                    )}
-                    {formatTimeControl(t.time_control_base, t.time_control_inc)}{" "}
-                    &middot; {t.rounds} 轮
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-ink-muted">
-                    创建于{" "}
-                    {new Date(t.created_at * 1000).toLocaleDateString("zh-CN")}
-                  </p>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
+                      {formatTimeControl(t.time_control_base, t.time_control_inc)}{" "}
+                      &middot;{" "}
+                      {t.format === "knockout"
+                        ? `每对 ${t.rounds * 2} 局`
+                        : `${t.rounds} 轮`}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xs text-ink-muted">
+                      创建于{" "}
+                      {new Date(t.created_at * 1000).toLocaleDateString("zh-CN")}
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
