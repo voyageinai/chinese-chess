@@ -12,6 +12,7 @@ import { createStrategy } from "./strategies";
 import type { RoundContext, Standing, BracketData } from "./strategies";
 import { KnockoutStrategy } from "./strategies";
 import type { ResultReport } from "./distributed/types";
+import { getLeaseManager } from "./distributed/lease-manager";
 
 // ---------------------------------------------------------------------------
 // Pairing generation
@@ -437,14 +438,30 @@ export class TournamentRunner extends EventEmitter {
     }
   }
 
-  /** Poll DB until all given games have results (for worker-dispatched games). */
+  /**
+   * Poll DB until all given games have results (for worker-dispatched games).
+   * Recovers orphaned games: if a game has started_at but no result and no
+   * active lease, reset it so a worker (or the next poll cycle) can pick it up.
+   */
   private async waitForAllGamesComplete(gameIds: string[]): Promise<void> {
     const POLL_INTERVAL = 2000;
+    const leaseMgr = getLeaseManager();
+
     while (!this.aborted) {
-      const allDone = gameIds.every((id) => {
+      let allDone = true;
+
+      for (const id of gameIds) {
         const g = queries.getGameById(id);
-        return g?.result != null;
-      });
+        if (g?.result != null) continue; // done
+        allDone = false;
+
+        // Orphan detection: game is started but nobody is running it
+        if (g?.started_at && !leaseMgr.hasActiveLease(id)) {
+          console.log(`[distributed] Recovering orphaned game ${id} — resetting for re-dispatch`);
+          queries.resetGameStarted(id);
+        }
+      }
+
       if (allDone) break;
       await new Promise((r) => setTimeout(r, POLL_INTERVAL));
     }
@@ -584,6 +601,20 @@ export class TournamentRunner extends EventEmitter {
     const allGames = queries.getGamesByTournament(this.tournamentId);
     const gameMap = new Map(allGames.map((g) => [g.id, g]));
 
+    // Purge phantom gameIds: bracket references games that no longer exist in DB.
+    // This can happen when the server crashes after persisting bracket but before
+    // the DB transaction commits, or if the WAL file was lost.
+    for (const match of bracket.matches) {
+      if (match.isBye || match.gameIds.length === 0) continue;
+      const validIds = match.gameIds.filter((id) => gameMap.has(id));
+      if (validIds.length !== match.gameIds.length) {
+        console.log(
+          `[bracket-sync] Match round=${match.round} pos=${match.position}: purged ${match.gameIds.length - validIds.length} phantom gameId(s)`,
+        );
+        match.gameIds = validIds;
+      }
+    }
+
     // Orphan recovery: games in DB not referenced by any bracket match
     const referencedIds = new Set(bracket.matches.flatMap((m) => m.gameIds));
     const orphanGames = allGames.filter((g) => !referencedIds.has(g.id));
@@ -612,6 +643,7 @@ export class TournamentRunner extends EventEmitter {
     for (const match of bracket.matches) {
       if (match.winner || match.isBye || match.gameIds.length < 2) continue;
       const matchGames = match.gameIds.map((id) => gameMap.get(id)).filter(Boolean) as Game[];
+      if (matchGames.length < 2) continue; // not enough valid games to determine winner
       if (matchGames.every((g) => g.result)) {
         const { winner, tiebreak } = knockout.determineMatchWinner(
           match,
@@ -628,6 +660,7 @@ export class TournamentRunner extends EventEmitter {
 
     // Main execution loop
     let fenIndex = 0;
+    let prevBracketSnapshot = "";
     while (!this.aborted && !knockout.isComplete(bracket)) {
       const readyMatches = knockout.getReadyMatches(bracket);
       const unresolvedMatches = knockout.getUnresolvedMatches(bracket);
@@ -636,6 +669,17 @@ export class TournamentRunner extends EventEmitter {
       const deciderMatches = bracket.matches.filter((m) => knockout.needsDecider(m));
 
       if (readyMatches.length === 0 && unresolvedMatches.length === 0 && deciderMatches.length === 0) break;
+
+      // Stall detection: if bracket state hasn't changed and there are no new
+      // games to run, the loop would spin forever. Break to avoid freezing.
+      const snapshot = JSON.stringify(bracket.matches.map((m) => [m.winner, m.gameIds.length]));
+      if (snapshot === prevBracketSnapshot && readyMatches.length === 0 && deciderMatches.length === 0) {
+        console.error(
+          `[bracket] Stall detected: unresolved matches but no progress possible. Breaking.`,
+        );
+        break;
+      }
+      prevBracketSnapshot = snapshot;
 
       // Create 2 regular games for new matches
       for (const match of readyMatches) {
@@ -681,6 +725,7 @@ export class TournamentRunner extends EventEmitter {
       for (const match of bracket.matches) {
         if (match.winner || match.isBye || match.gameIds.length < 2) continue;
         const matchGames = match.gameIds.map((id) => freshMap.get(id)).filter(Boolean) as Game[];
+        if (matchGames.length < 2) continue; // not enough valid games to determine winner
         if (!matchGames.every((g) => g.result)) continue;
 
         const { winner, tiebreak } = knockout.determineMatchWinner(
