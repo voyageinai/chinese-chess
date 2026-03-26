@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { validateWorkerAuth, denyWorkerAuth, isDistributedEnabled } from "@/server/distributed/auth";
 import { pollTask } from "@/server/distributed/task-queue";
+import { getLeaseManager } from "@/server/distributed/lease-manager";
 import type { PollRequest } from "@/server/distributed/types";
 
 export async function POST(request: Request) {
@@ -21,6 +22,9 @@ export async function POST(request: Request) {
   if (!body.workerId) {
     return NextResponse.json({ error: "workerId required" }, { status: 400 });
   }
+
+  // Track worker activity regardless of task availability
+  getLeaseManager().trackWorker(body.workerId);
 
   const task = pollTask(body.workerId);
   if (!task) {

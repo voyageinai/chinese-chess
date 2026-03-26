@@ -8,8 +8,56 @@ const SWEEP_INTERVAL_MS = parseInt(
   10,
 ); // 30s
 
+// Workers that haven't been seen for this long are considered offline
+const WORKER_OFFLINE_MS = 60_000; // 60s
+
+// ---------------------------------------------------------------------------
+// Worker stats (in-memory, resets on master restart)
+// ---------------------------------------------------------------------------
+
+export interface WorkerStats {
+  workerId: string;
+  lastSeenAt: number;
+  completedGames: number;
+  /** Current ply counts reported by heartbeats, keyed by gameId */
+  currentPly: Map<string, number>;
+}
+
+export interface WorkerMonitoringInfo {
+  id: string;
+  status: "online" | "idle" | "offline";
+  currentGames: string[];
+  lastSeenAt: number;
+  completedGames: number;
+}
+
+export interface LeaseMonitoringInfo {
+  gameId: string;
+  leaseId: string;
+  workerId: string;
+  grantedAt: number;
+  expiresAt: number;
+  ply: number;
+}
+
+export interface DistributedMonitoringData {
+  enabled: boolean;
+  workers: WorkerMonitoringInfo[];
+  leases: LeaseMonitoringInfo[];
+  stats: {
+    totalWorkers: number;
+    onlineWorkers: number;
+    activeLeases: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// LeaseManager
+// ---------------------------------------------------------------------------
+
 export class LeaseManager {
   private leases = new Map<string, Lease>(); // gameId → Lease
+  private workerStats = new Map<string, WorkerStats>(); // workerId → stats
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   start(): void {
@@ -70,6 +118,11 @@ export class LeaseManager {
     }
   }
 
+  /** Get a lease by gameId (for reading workerId before release). */
+  getLease(gameId: string): Lease | null {
+    return this.leases.get(gameId) ?? null;
+  }
+
   /** Check if a game has an active lease. */
   hasActiveLease(gameId: string): boolean {
     const lease = this.leases.get(gameId);
@@ -81,6 +134,108 @@ export class LeaseManager {
     return true;
   }
 
+  // ── Worker tracking ─────────────────────────────────────────────────
+
+  /** Record a worker interaction (poll, heartbeat, result). */
+  trackWorker(workerId: string): void {
+    let stats = this.workerStats.get(workerId);
+    if (!stats) {
+      stats = { workerId, lastSeenAt: Date.now(), completedGames: 0, currentPly: new Map() };
+      this.workerStats.set(workerId, stats);
+    }
+    stats.lastSeenAt = Date.now();
+  }
+
+  /** Record heartbeat ply for a game. */
+  trackHeartbeat(workerId: string, gameId: string, ply: number): void {
+    this.trackWorker(workerId);
+    const stats = this.workerStats.get(workerId)!;
+    stats.currentPly.set(gameId, ply);
+  }
+
+  /** Record game completion by a worker. */
+  trackCompletion(workerId: string, gameId: string): void {
+    this.trackWorker(workerId);
+    const stats = this.workerStats.get(workerId)!;
+    stats.completedGames++;
+    stats.currentPly.delete(gameId);
+  }
+
+  // ── Monitoring ──────────────────────────────────────────────────────
+
+  /** Build monitoring data snapshot for the admin API. */
+  getMonitoringData(): DistributedMonitoringData {
+    const now = Date.now();
+
+    // Build set of workerIds that currently hold leases
+    const workerLeaseMap = new Map<string, string[]>(); // workerId → gameIds
+    for (const lease of this.leases.values()) {
+      if (lease.expiresAt > now) {
+        const games = workerLeaseMap.get(lease.workerId) || [];
+        games.push(lease.gameId);
+        workerLeaseMap.set(lease.workerId, games);
+      }
+    }
+
+    // Workers
+    const workers: WorkerMonitoringInfo[] = [];
+    for (const stats of this.workerStats.values()) {
+      const currentGames = workerLeaseMap.get(stats.workerId) || [];
+      let status: "online" | "idle" | "offline";
+      if (now - stats.lastSeenAt > WORKER_OFFLINE_MS) {
+        status = "offline";
+      } else if (currentGames.length > 0) {
+        status = "online";
+      } else {
+        status = "idle";
+      }
+      workers.push({
+        id: stats.workerId,
+        status,
+        currentGames,
+        lastSeenAt: stats.lastSeenAt,
+        completedGames: stats.completedGames,
+      });
+    }
+    // Sort: online first, then idle, then offline
+    const statusOrder = { online: 0, idle: 1, offline: 2 };
+    workers.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+
+    // Leases
+    const leases: LeaseMonitoringInfo[] = [];
+    for (const lease of this.leases.values()) {
+      if (lease.expiresAt > now) {
+        const workerStat = this.workerStats.get(lease.workerId);
+        leases.push({
+          gameId: lease.gameId,
+          leaseId: lease.leaseId,
+          workerId: lease.workerId,
+          grantedAt: lease.grantedAt,
+          expiresAt: lease.expiresAt,
+          ply: workerStat?.currentPly.get(lease.gameId) ?? 0,
+        });
+      }
+    }
+
+    const onlineWorkers = workers.filter((w) => w.status !== "offline").length;
+
+    return {
+      enabled: true,
+      workers,
+      leases,
+      stats: {
+        totalWorkers: workers.length,
+        onlineWorkers,
+        activeLeases: leases.length,
+      },
+    };
+  }
+
+  /** Get current lease count (for monitoring). */
+  get activeCount(): number {
+    return this.leases.size;
+  }
+
   /** Sweep expired leases and reset their games for re-dispatch. */
   private expireStale(): void {
     const now = Date.now();
@@ -90,6 +245,9 @@ export class LeaseManager {
           `[lease] Expired: game=${gameId} worker=${lease.workerId} (stale ${Math.round((now - lease.expiresAt) / 1000)}s)`,
         );
         this.leases.delete(gameId);
+        // Clean from worker ply tracking
+        const stats = this.workerStats.get(lease.workerId);
+        if (stats) stats.currentPly.delete(gameId);
         try {
           resetGameStarted(gameId);
         } catch (err) {
@@ -97,11 +255,6 @@ export class LeaseManager {
         }
       }
     }
-  }
-
-  /** Get current lease count (for monitoring). */
-  get activeCount(): number {
-    return this.leases.size;
   }
 }
 

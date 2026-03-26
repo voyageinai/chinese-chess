@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { validateWorkerAuth, denyWorkerAuth, isDistributedEnabled } from "@/server/distributed/auth";
 import { handleResult } from "@/server/distributed/task-queue";
+import { getLeaseManager } from "@/server/distributed/lease-manager";
 import type { ResultReport } from "@/server/distributed/types";
 
 export async function POST(

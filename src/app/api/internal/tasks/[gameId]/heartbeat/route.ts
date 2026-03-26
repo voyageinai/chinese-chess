@@ -24,6 +24,8 @@ export async function POST(
   }
 
   const leaseMgr = getLeaseManager();
+  leaseMgr.trackHeartbeat(body.workerId, gameId, body.ply);
+
   const newExpiry = leaseMgr.renew(gameId, body.leaseId);
 
   if (newExpiry === null) {

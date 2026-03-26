@@ -126,7 +126,12 @@ export function handleResult(
     applyStandaloneElo(game, report);
   }
 
-  // Release lease
+  // Track completion and release lease
+  // Extract workerId from lease before releasing (for stats tracking)
+  const lease = leaseMgr.getLease(gameId);
+  if (lease) {
+    leaseMgr.trackCompletion(lease.workerId, gameId);
+  }
   leaseMgr.release(gameId, report.leaseId);
 
   return { ok: true };
