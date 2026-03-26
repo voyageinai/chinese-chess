@@ -56,6 +56,10 @@ function countdown(expiresAt: number): string {
   return `${remain}s`;
 }
 
+function isExpiringSoon(expiresAt: number): boolean {
+  return expiresAt - Date.now() < 30000;
+}
+
 function duration(startMs: number): string {
   const secs = Math.round((Date.now() - startMs) / 1000);
   if (secs < 60) return `${secs}s`;
@@ -201,7 +205,7 @@ export default function WorkersPage() {
                     <td className="py-2 pr-4">
                       <a
                         href={`/games/${l.gameId}`}
-                        className="font-mono text-xs text-accent hover:underline"
+                        className="font-mono text-xs text-blue-600 dark:text-blue-400 hover:underline"
                       >
                         {l.gameId.slice(0, 10)}...
                       </a>
@@ -212,7 +216,7 @@ export default function WorkersPage() {
                     <td className="py-2 pr-4">
                       <span
                         className={
-                          l.expiresAt - Date.now() < 30000
+                          isExpiringSoon(l.expiresAt)
                             ? "text-red-500"
                             : "text-ink-muted"
                         }
