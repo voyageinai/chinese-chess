@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { validateWorkerAuth, denyWorkerAuth, isDistributedEnabled } from "@/server/distributed/auth";
 import * as queries from "@/db/queries";
+import { cleanupSandboxTournamentResources } from "@/server/sandbox";
 
 /** GET: query sandbox tournament status and results */
 export async function GET(
@@ -64,6 +65,6 @@ export async function DELETE(
     return NextResponse.json({ error: "Sandbox tournament not found" }, { status: 404 });
   }
 
-  queries.deleteSandboxTournament(id);
+  cleanupSandboxTournamentResources(id);
   return NextResponse.json({ ok: true });
 }
