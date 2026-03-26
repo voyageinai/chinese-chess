@@ -13,6 +13,7 @@ import type { RoundContext, Standing, BracketData } from "./strategies";
 import { KnockoutStrategy } from "./strategies";
 import type { ResultReport } from "./distributed/types";
 import { getLeaseManager } from "./distributed/lease-manager";
+import { cleanupSandboxTournamentResources } from "./sandbox";
 
 // ---------------------------------------------------------------------------
 // Pairing generation
@@ -168,6 +169,9 @@ export class TournamentRunner extends EventEmitter {
     this.emit("game_end", {
       type: "game_end",
       gameId,
+      tournamentId: this.tournamentId,
+      redEngineId: game.red_engine_id,
+      blackEngineId: game.black_engine_id,
       result: report.result,
       code: report.code,
       reason: report.reason,
@@ -252,6 +256,9 @@ export class TournamentRunner extends EventEmitter {
     this.emit("game_start", {
       type: "game_start",
       gameId,
+      tournamentId: this.tournamentId,
+      redEngineId: game.red_engine_id,
+      blackEngineId: game.black_engine_id,
       redEngine: redEngine.name,
       blackEngine: blackEngine.name,
       redTime: initialTimeMs,
@@ -394,6 +401,9 @@ export class TournamentRunner extends EventEmitter {
     this.emit("game_end", {
       type: "game_end",
       gameId,
+      tournamentId: this.tournamentId,
+      redEngineId: game.red_engine_id,
+      blackEngineId: game.black_engine_id,
       result: result.result,
       code: result.code,
       reason: result.reason,
@@ -568,19 +578,7 @@ export class TournamentRunner extends EventEmitter {
     // Sandbox auto-cleanup: delete all games, entries, and the tournament itself
     if (this.sandbox) {
       console.log(`[sandbox] Cleaning up sandbox tournament ${this.tournamentId}`);
-      // Also remove sandbox engine files
-      for (const engine of this.engines.values()) {
-        if (engine.user_id === "__sandbox__") {
-          try {
-            const engineDir = path.dirname(engine.binary_path);
-            fs.rmSync(engineDir, { recursive: true, force: true });
-            queries.hardDeleteEngine(engine.id);
-          } catch (err) {
-            console.error(`[sandbox] Failed to clean engine ${engine.id}:`, err);
-          }
-        }
-      }
-      queries.deleteSandboxTournament(this.tournamentId);
+      cleanupSandboxTournamentResources(this.tournamentId);
       console.log(`[sandbox] Cleanup complete for ${this.tournamentId}`);
     }
   }

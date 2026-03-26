@@ -3,11 +3,14 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import path from "path";
-import { mkdir, writeFile, chmod } from "fs/promises";
+import { mkdir, writeFile, chmod, rm } from "fs/promises";
 import { validateWorkerAuth, denyWorkerAuth, isDistributedEnabled } from "@/server/distributed/auth";
+import { ensureSandboxUser } from "@/db/index";
 import * as queries from "@/db/queries";
 import { TournamentRunner, registerRunner } from "@/server/tournament";
 import { wsHub } from "@/server/ws";
+import { SANDBOX_USER_ID } from "@/lib/service-users";
+import { verifyEngine } from "@/server/engine-validation";
 
 export async function POST(request: Request) {
   if (!isDistributedEnabled()) {
@@ -39,9 +42,11 @@ export async function POST(request: Request) {
       }
     }
 
+    ensureSandboxUser();
+
     // Save sandbox engine to temporary directory
     const sandboxEngineId = nanoid();
-    const engineDir = path.join(process.cwd(), "data", "engines", "__sandbox__", sandboxEngineId);
+    const engineDir = path.join(process.cwd(), "data", "engines", SANDBOX_USER_ID, sandboxEngineId);
     await mkdir(engineDir, { recursive: true });
 
     const filename = engineFile.name || "engine";
@@ -50,14 +55,21 @@ export async function POST(request: Request) {
     await writeFile(binaryPath, buffer);
     await chmod(binaryPath, 0o755);
 
+    // Verify engine: UCI handshake + coordinate probe
+    const verifyError = await verifyEngine(binaryPath);
+    if (verifyError) {
+      await rm(engineDir, { recursive: true, force: true });
+      return NextResponse.json({ error: verifyError }, { status: 400 });
+    }
+
     // Register sandbox engine in DB
-    const engine = queries.createEngine("__sandbox__", engineName, binaryPath, "public");
+    const engine = queries.createEngine(SANDBOX_USER_ID, engineName, binaryPath, "private");
 
     // Create sandbox tournament
-    // Each opponent plays `games` games (games/2 as red, games/2 as black)
+    // `games` is per-opponent; round up to even for color balance
     const rounds = 1;
     const tournament = queries.createTournament(
-      "__sandbox__",
+      SANDBOX_USER_ID,
       `[sandbox] ${engineName} test`,
       timeBase,
       timeInc,
@@ -74,7 +86,7 @@ export async function POST(request: Request) {
     }
 
     // Create game pairings manually (sandbox engine vs each opponent, swapping colors)
-    const gamesPerOpponent = Math.max(2, Math.floor(games / opponentIds.length));
+    const gamesPerOpponent = Math.max(2, games % 2 === 0 ? games : games + 1);
     for (const oid of opponentIds) {
       for (let i = 0; i < gamesPerOpponent; i++) {
         if (i % 2 === 0) {

@@ -11,6 +11,15 @@
  *     --master https://chess.chatpig.space \
  *     --secret zhumadian666
  *
+ * Options:
+ *   --engine   引擎可执行文件路径 (必需)
+ *   --against  对手引擎名，逗号分隔 (必需)
+ *   --games    每个对手的对局数，自动取偶数 (默认 2)
+ *   --tc       时间控制 "秒+增量" (默认 60+1)
+ *   --master   集群 master URL (或 MASTER_URL 环境变量)
+ *   --secret   worker 密钥 (或 WORKER_SECRET 环境变量)
+ *   --name     引擎显示名 (默认取文件名)
+ *
  * Environment variables (alternative to flags):
  *   MASTER_URL, WORKER_SECRET
  */
@@ -61,13 +70,74 @@ function parseTc(tc: string): { base: number; inc: number } {
 async function api(
   masterUrl: string,
   secret: string,
-  path: string,
+  apiPath: string,
   method: string,
   body?: FormData | string,
 ): Promise<Response> {
   const headers: Record<string, string> = { "x-worker-secret": secret };
   if (typeof body === "string") headers["content-type"] = "application/json";
-  return fetch(`${masterUrl}${path}`, { method, headers, body });
+  return fetch(`${masterUrl}${apiPath}`, { method, headers, body });
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket with reconnect
+// ---------------------------------------------------------------------------
+
+interface WsOptions {
+  url: string;
+  onMessage: (msg: Record<string, unknown>) => void;
+  onConnected?: () => void;
+  maxRetries?: number;
+}
+
+function createReconnectingWs(options: WsOptions): { close: () => void } {
+  const { url, onMessage, onConnected, maxRetries = 3 } = options;
+  let retries = 0;
+  let ws: WebSocket;
+  let closed = false;
+
+  function connect() {
+    ws = new WebSocket(url);
+
+    ws.on("open", () => {
+      retries = 0; // reset on successful connection
+      onConnected?.();
+    });
+
+    ws.on("message", (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        onMessage(msg);
+      } catch {
+        // ignore malformed messages
+      }
+    });
+
+    ws.on("close", () => {
+      if (closed) return;
+      if (retries < maxRetries) {
+        const delay = Math.pow(2, retries + 1) * 1000; // 2s, 4s, 8s
+        retries++;
+        console.log(`\x1b[33mWebSocket 断连，${delay / 1000}s 后重连 (${retries}/${maxRetries})...\x1b[0m`);
+        setTimeout(connect, delay);
+      } else {
+        console.error("\x1b[31mWebSocket 重连失败，已达最大重试次数\x1b[0m");
+      }
+    });
+
+    ws.on("error", (err) => {
+      console.error("WebSocket 错误:", err.message);
+    });
+  }
+
+  connect();
+
+  return {
+    close() {
+      closed = true;
+      ws?.close();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -94,18 +164,15 @@ async function main() {
   const engineFilename = path.basename(engineAbsPath);
   const engineName = opts.name || engineFilename.replace(/\.[^.]+$/, "");
 
-  console.log(`引擎: ${engineName} (${engineAbsPath})`);
-  console.log(`时间: ${base}+${inc}s | 每对手 ${opts.games} 局`);
+  const gamesPerOpponent = opts.games;
 
   // Step 1: Resolve opponent IDs by name
   console.log("\n查找对手引擎...");
   const enginesRes = await api(opts.masterUrl, opts.secret, "/api/internal/sandbox/engines", "GET");
-
-  // The engines endpoint doesn't exist yet for internal — use the public endpoint
-  // Actually let's query the public engines list
-  const enginesListRes = await fetch(`${opts.masterUrl}/api/engines`);
-  if (!enginesListRes.ok) fail("无法获取引擎列表");
-  const enginesList = await enginesListRes.json();
+  if (!enginesRes.ok) {
+    fail(`无法获取内部引擎列表: ${await enginesRes.text()}`);
+  }
+  const enginesList = await enginesRes.json();
   const allEngines: { id: string; name: string; elo: number }[] =
     (enginesList.engines || enginesList || []);
 
@@ -124,6 +191,9 @@ async function main() {
     console.log(`  ${match.name} (Elo ${match.elo})`);
   }
 
+  console.log(`\n引擎: ${engineName} (${engineAbsPath})`);
+  console.log(`时间: ${base}+${inc}s | 每对手 ${gamesPerOpponent} 局, 共 ${gamesPerOpponent * againstNames.length} 局`);
+
   // Step 2: Upload engine and create sandbox test
   console.log("\n上传引擎到集群...");
   const fileBuffer = readFileSync(engineAbsPath);
@@ -131,7 +201,7 @@ async function main() {
   formData.append("engine", new Blob([fileBuffer]), engineFilename);
   formData.append("engineName", engineName);
   formData.append("opponentIds", opponentIds.join(","));
-  formData.append("games", String(opts.games));
+  formData.append("games", String(gamesPerOpponent));
   formData.append("timeBase", String(base));
   formData.append("timeInc", String(inc));
 
@@ -147,16 +217,28 @@ async function main() {
   }
 
   const testInfo = await createRes.json();
-  console.log(`测试已创建: ${testInfo.gameCount} 局, ${testInfo.timeControl}`);
+  const totalGames: number = testInfo.gameCount;
+  console.log(`测试已创建: ${totalGames} 局, ${testInfo.timeControl}`);
   console.log(`锦标赛ID: ${testInfo.tournamentId}`);
 
   // Step 3: Connect WebSocket and stream results
   const wsUrl = opts.masterUrl.replace(/^http/, "ws") + "/ws";
-  const ws = new WebSocket(wsUrl);
 
-  const engineId = testInfo.engineId;
-  const gameResults: { gameId: string; result: string; code: string; detail: string }[] = [];
+  const engineId: string = testInfo.engineId;
+  const tournamentId: string = testInfo.tournamentId;
+
+  // Local result accumulation — no dependency on API fetch
+  interface GameResult {
+    gameId: string;
+    redEngineId: string;
+    blackEngineId: string;
+    result: string;
+    code: string;
+    detail: string;
+  }
+  const gameResults: GameResult[] = [];
   let gameCount = 0;
+  let reportShown = false;
 
   // Build engine name lookup
   const nameMap = new Map<string, string>();
@@ -165,144 +247,133 @@ async function main() {
     nameMap.set(opponentIds[i], againstNames[i]);
   }
 
-  ws.on("open", () => {
-    // Subscribe to all games for this tournament
-    // We'll filter by tournament events
-  });
-
   const startTime = Date.now();
 
-  ws.on("message", (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
+  const wsHandle = createReconnectingWs({
+    url: wsUrl,
+    onMessage(msg) {
+      // Filter: only process events for our tournament
+      if (msg.tournamentId && msg.tournamentId !== tournamentId) return;
 
-      if (msg.type === "game_start" && msg.gameId) {
-        // We'll track by game_end
+      if (msg.type === "game_start" && msg.tournamentId === tournamentId) {
+        const red = nameMap.get(msg.redEngineId as string) || "?";
+        const black = nameMap.get(msg.blackEngineId as string) || "?";
+        console.log(`\x1b[2m  开始: ${red} (红) vs ${black} (黑)\x1b[0m`);
       }
 
-      if (msg.type === "game_end" && msg.gameId) {
+      if (msg.type === "game_end" && msg.tournamentId === tournamentId) {
         gameResults.push({
-          gameId: msg.gameId,
-          result: msg.result,
-          code: msg.code,
-          detail: msg.detail,
+          gameId: msg.gameId as string,
+          redEngineId: msg.redEngineId as string,
+          blackEngineId: msg.blackEngineId as string,
+          result: msg.result as string,
+          code: msg.code as string,
+          detail: msg.detail as string,
         });
         gameCount++;
 
         // Determine display
-        const total = testInfo.gameCount;
-        const code = msg.code || "";
+        const code = (msg.code as string) || "";
         const resultText =
           msg.result === "red" ? "红胜" : msg.result === "black" ? "黑胜" : "和棋";
 
+        // Show which engine won from our perspective
+        const isRed = msg.redEngineId === engineId;
+        const ourResult =
+          msg.result === "draw" ? "=" :
+          ((msg.result === "red" && isRed) || (msg.result === "black" && !isRed)) ? "+" : "-";
+        const marker = ourResult === "+" ? "\x1b[32m+\x1b[0m" : ourResult === "-" ? "\x1b[31m-\x1b[0m" : "\x1b[33m=\x1b[0m";
+
         console.log(
-          `[${gameCount}/${total}] ${resultText} (${code})`,
+          `[${gameCount}/${totalGames}] ${marker} ${resultText} (${code})`,
         );
 
-        if (gameCount >= total) {
-          // All done — wait a moment for cleanup then show report
-          setTimeout(() => showReport(), 1000);
+        if (gameCount >= totalGames) {
+          showReport();
         }
       }
 
-      if (msg.type === "tournament_end") {
-        if (gameCount < testInfo.gameCount) {
-          // Tournament ended early — show what we have
-          setTimeout(() => showReport(), 500);
+      if (msg.type === "tournament_end" && msg.tournamentId === tournamentId) {
+        if (!reportShown) {
+          showReport();
         }
       }
-    } catch {
-      // ignore
-    }
+    },
   });
 
   function showReport() {
+    if (reportShown) return;
+    reportShown = true;
+
     const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-    // Fetch final results from API
-    fetch(`${opts.masterUrl}/api/internal/sandbox/${testInfo.tournamentId}`, {
-      headers: { "x-worker-secret": opts.secret },
-    })
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        console.log("\n" + "═".repeat(50));
+    console.log("\n" + "═".repeat(50));
 
-        if (data) {
-          // Calculate W/L/D from perspective of our engine
-          let wins = 0, losses = 0, draws = 0;
-          const oppStats = new Map<string, { w: number; l: number; d: number }>();
+    // Calculate W/L/D from locally accumulated results
+    let wins = 0, losses = 0, draws = 0;
+    const oppStats = new Map<string, { w: number; l: number; d: number }>();
 
-          for (const g of data.games) {
-            const isRed = g.redEngineId === engineId;
-            const oppId = isRed ? g.blackEngineId : g.redEngineId;
+    for (const g of gameResults) {
+      const isRed = g.redEngineId === engineId;
+      const oppId = isRed ? g.blackEngineId : g.redEngineId;
 
-            if (!oppStats.has(oppId)) oppStats.set(oppId, { w: 0, l: 0, d: 0 });
-            const s = oppStats.get(oppId)!;
+      if (!oppStats.has(oppId)) oppStats.set(oppId, { w: 0, l: 0, d: 0 });
+      const s = oppStats.get(oppId)!;
 
-            if (g.result === "draw") {
-              draws++;
-              s.d++;
-            } else if (
-              (g.result === "red" && isRed) ||
-              (g.result === "black" && !isRed)
-            ) {
-              wins++;
-              s.w++;
-            } else if (g.result) {
-              losses++;
-              s.l++;
-            }
-          }
+      if (g.result === "draw") {
+        draws++;
+        s.d++;
+      } else if (
+        (g.result === "red" && isRed) ||
+        (g.result === "black" && !isRed)
+      ) {
+        wins++;
+        s.w++;
+      } else if (g.result) {
+        losses++;
+        s.l++;
+      }
+    }
 
-          const total = wins + losses + draws;
-          const pct = total > 0 ? ((wins + draws * 0.5) / total * 100).toFixed(1) : "0.0";
+    const total = wins + losses + draws;
+    const pct = total > 0 ? ((wins + draws * 0.5) / total * 100).toFixed(1) : "0.0";
 
-          console.log(`  结果: +${wins} =${draws} -${losses} (${pct}%)`);
-          console.log();
+    console.log(`  结果: +${wins} =${draws} -${losses} (${pct}%)`);
+    console.log();
 
-          for (const [oppId, s] of oppStats) {
-            const oppName = nameMap.get(oppId) || oppId.slice(0, 10);
-            const oppTotal = s.w + s.l + s.d;
-            const oppScore = s.w + s.d * 0.5;
-            console.log(`  vs ${oppName.padEnd(20)} ${oppScore}/${oppTotal}  (+${s.w} =${s.d} -${s.l})`);
-          }
+    for (const [oppId, s] of oppStats) {
+      const oppName = nameMap.get(oppId) || oppId.slice(0, 10);
+      const oppTotal = s.w + s.l + s.d;
+      const oppScore = s.w + s.d * 0.5;
+      console.log(`  vs ${oppName.padEnd(20)} ${oppScore}/${oppTotal}  (+${s.w} =${s.d} -${s.l})`);
+    }
 
-          // Elo estimation (simple)
-          if (total >= 4) {
-            const score = (wins + draws * 0.5) / total;
-            const eloDiff = score === 1 ? 400 : score === 0 ? -400 :
-              Math.round(-400 * Math.log10(1 / score - 1));
-            const margin = Math.round(400 / Math.sqrt(total));
-            console.log(`\n  Elo估算: ${eloDiff >= 0 ? "+" : ""}${eloDiff} ±${margin} (相对对手平均水平)`);
-          }
-        }
+    // Elo estimation (simple logistic)
+    if (total >= 4) {
+      const score = (wins + draws * 0.5) / total;
+      const eloDiff = score === 1 ? 400 : score === 0 ? -400 :
+        Math.round(-400 * Math.log10(1 / score - 1));
+      const margin = Math.round(400 / Math.sqrt(total));
+      console.log(`\n  Elo估算: ${eloDiff >= 0 ? "+" : ""}${eloDiff} ±${margin} (相对对手平均水平)`);
+    }
 
-        console.log(`\n  耗时: ${elapsed}s`);
-        console.log("  线上无痕 (sandbox 自动清理)");
-        console.log("═".repeat(50));
+    console.log(`\n  耗时: ${elapsed}s`);
+    console.log("  线上无痕 (sandbox 自动清理)");
+    console.log("═".repeat(50));
 
-        ws.close();
-        process.exit(0);
-      })
-      .catch(() => {
-        console.log(`\n完成 (${elapsed}s). 线上无痕.`);
-        ws.close();
-        process.exit(0);
-      });
+    wsHandle.close();
+    process.exit(0);
   }
 
-  // Timeout safety
-  const maxWait = (base * 2 + 60) * testInfo.gameCount * 1000;
+  // Timeout safety — account for potential concurrency (default 2)
+  const concurrency = parseInt(process.env.MAX_CONCURRENT_MATCHES || "2", 10);
+  const maxWait = (base * 2 + 60) * Math.ceil(totalGames / concurrency) * 1000;
   setTimeout(() => {
-    if (gameCount < testInfo.gameCount) {
+    if (!reportShown) {
       console.log("\n超时，输出已有结果...");
       showReport();
     }
   }, maxWait);
-
-  ws.on("error", (err) => {
-    console.error("WebSocket 错误:", err.message);
-  });
 }
 
 main().catch((err) => {
