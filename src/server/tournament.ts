@@ -575,11 +575,15 @@ export class TournamentRunner extends EventEmitter {
     // Emit tournament_end
     this.emit("tournament_end", { type: "tournament_end", tournamentId: this.tournamentId });
 
-    // Sandbox auto-cleanup: delete all games, entries, and the tournament itself
+    // Sandbox delayed cleanup: wait for CLI to fetch results before deleting
     if (this.sandbox) {
-      console.log(`[sandbox] Cleaning up sandbox tournament ${this.tournamentId}`);
-      cleanupSandboxTournamentResources(this.tournamentId);
-      console.log(`[sandbox] Cleanup complete for ${this.tournamentId}`);
+      const SANDBOX_CLEANUP_DELAY = 60_000; // 60s grace period for CLI to pull results
+      console.log(`[sandbox] Scheduling cleanup for ${this.tournamentId} in ${SANDBOX_CLEANUP_DELAY / 1000}s`);
+      setTimeout(() => {
+        console.log(`[sandbox] Cleaning up sandbox tournament ${this.tournamentId}`);
+        cleanupSandboxTournamentResources(this.tournamentId);
+        console.log(`[sandbox] Cleanup complete for ${this.tournamentId}`);
+      }, SANDBOX_CLEANUP_DELAY);
     }
   }
 

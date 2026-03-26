@@ -312,6 +312,54 @@ async function main() {
   console.log(`测试已创建: ${totalGames} 局, ${testInfo.timeControl}`);
   console.log(`锦标赛ID: ${tournamentId}`);
 
+  // Step 4: API polling fallback — if WS events don't arrive, poll the API
+  const API_POLL_INTERVAL = 5000; // 5s
+  let lastSeenCompleted = 0;
+
+  const pollTimer = setInterval(async () => {
+    if (reportShown) { clearInterval(pollTimer); return; }
+    try {
+      const res = await fetch(`${opts.masterUrl}/api/internal/sandbox/${tournamentId}`, {
+        headers: { "x-worker-secret": opts.secret },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const completedGames = data.games.filter((g: { result: string | null }) => g.result);
+      if (completedGames.length <= lastSeenCompleted) return;
+
+      // Ingest any games we haven't seen via WS
+      for (const g of completedGames) {
+        if (gameResults.some((r) => r.gameId === g.id)) continue; // already have it
+        gameResults.push({
+          gameId: g.id,
+          redEngineId: g.redEngineId,
+          blackEngineId: g.blackEngineId,
+          result: g.result,
+          code: g.resultCode || "",
+          detail: g.resultReason || "",
+        });
+        gameCount++;
+
+        const resultText = g.result === "red" ? "红胜" : g.result === "black" ? "黑胜" : "和棋";
+        const isRed = g.redEngineId === engineId;
+        const ourResult =
+          g.result === "draw" ? "=" :
+          ((g.result === "red" && isRed) || (g.result === "black" && !isRed)) ? "+" : "-";
+        const marker = ourResult === "+" ? "\x1b[32m+\x1b[0m" : ourResult === "-" ? "\x1b[31m-\x1b[0m" : "\x1b[33m=\x1b[0m";
+        console.log(`[${gameCount}/${totalGames}] ${marker} ${resultText} (${g.resultCode || ""}) [poll]`);
+      }
+
+      lastSeenCompleted = completedGames.length;
+
+      if (gameCount >= totalGames) {
+        showReport();
+      }
+    } catch {
+      // ignore poll errors
+    }
+  }, API_POLL_INTERVAL);
+
   // Timeout safety — account for potential concurrency (default 2)
   const concurrency = parseInt(process.env.MAX_CONCURRENT_MATCHES || "2", 10);
   const maxWait = (base * 2 + 60) * Math.ceil(totalGames / concurrency) * 1000;
@@ -325,6 +373,7 @@ async function main() {
   function showReport() {
     if (reportShown) return;
     reportShown = true;
+    clearInterval(pollTimer);
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
 
