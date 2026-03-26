@@ -9,7 +9,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import {
   Table,
@@ -32,6 +31,14 @@ import {
   Search,
   Database,
 } from "lucide-react";
+import {
+  RESULT_CODE_OPTIONS,
+  getGameResultLabel,
+  getEngineOutcomeLabel,
+  translateResult,
+} from "@/lib/results";
+import type { EngineOutcome } from "@/lib/results";
+import type { ResultCode, Color } from "@/lib/types";
 
 interface LeaderboardEngine {
   id: string;
@@ -46,7 +53,11 @@ interface GameRow {
   red_engine_name: string;
   black_engine_name: string;
   result: "red" | "black" | "draw";
+  result_code: ResultCode | null;
   result_reason: string | null;
+  result_detail: string | null;
+  engine_side: Color | null;
+  engine_outcome: EngineOutcome | null;
   finished_at: number | null;
 }
 
@@ -58,11 +69,18 @@ interface GamesResponse {
   totalPages: number;
 }
 
-const RESULT_LABELS: Record<string, string> = {
+const BOARD_RESULT_LABELS: Record<string, string> = {
   "": "全部",
   red: "红胜",
   black: "黑胜",
   draw: "和棋",
+};
+
+const OUTCOME_LABELS: Record<string, string> = {
+  "": "全部",
+  win: "胜",
+  loss: "负",
+  draw: "和",
 };
 
 export default function GamesPage() {
@@ -73,7 +91,9 @@ export default function GamesPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [engineFilter, setEngineFilter] = useState("");
-  const [resultFilter, setResultFilter] = useState("");
+  const [boardResultFilter, setBoardResultFilter] = useState("");
+  const [outcomeFilter, setOutcomeFilter] = useState("");
+  const [resultCodeFilter, setResultCodeFilter] = useState("");
 
   // Load engines for filter dropdown
   useEffect(() => {
@@ -90,7 +110,9 @@ export default function GamesPage() {
       const params = new URLSearchParams();
       params.set("page", String(page));
       if (engineFilter) params.set("engineId", engineFilter);
-      if (resultFilter) params.set("result", resultFilter);
+      if (boardResultFilter) params.set("result", boardResultFilter);
+      if (outcomeFilter) params.set("outcome", outcomeFilter);
+      if (resultCodeFilter) params.set("resultCode", resultCodeFilter);
 
       const res = await fetch(`/api/games?${params.toString()}`);
       const data: GamesResponse = await res.json();
@@ -104,7 +126,7 @@ export default function GamesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, engineFilter, resultFilter]);
+  }, [page, engineFilter, boardResultFilter, outcomeFilter, resultCodeFilter]);
 
   useEffect(() => {
     void loadGames();
@@ -113,13 +135,21 @@ export default function GamesPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [engineFilter, resultFilter]);
+  }, [engineFilter, boardResultFilter, outcomeFilter, resultCodeFilter]);
+
+  useEffect(() => {
+    if (!engineFilter && outcomeFilter) {
+      setOutcomeFilter("");
+    }
+  }, [engineFilter, outcomeFilter]);
 
   function buildExportUrl(format: string) {
     const params = new URLSearchParams();
     params.set("format", format);
     if (engineFilter) params.set("engineId", engineFilter);
-    if (resultFilter) params.set("result", resultFilter);
+    if (boardResultFilter) params.set("result", boardResultFilter);
+    if (outcomeFilter) params.set("outcome", outcomeFilter);
+    if (resultCodeFilter) params.set("resultCode", resultCodeFilter);
     return `/api/games/export?${params.toString()}`;
   }
 
@@ -131,6 +161,69 @@ export default function GamesPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  }
+
+  const engineLabel = engineFilter
+    ? engines.find((engine) => engine.id === engineFilter)?.name ?? "全部引擎"
+    : "全部引擎";
+  const outcomeLabel = outcomeFilter
+    ? OUTCOME_LABELS[outcomeFilter] ?? "全部"
+    : engineFilter
+      ? "全部"
+      : "先选引擎";
+  const boardResultLabel = boardResultFilter
+    ? BOARD_RESULT_LABELS[boardResultFilter] ?? "全部"
+    : "全部";
+  const resultCodeLabel = resultCodeFilter
+    ? RESULT_CODE_OPTIONS.find((option) => option.value === resultCodeFilter)?.label ?? "全部原因"
+    : "全部原因";
+
+  function getResultBadge(game: GameRow): {
+    label: string;
+    variant: "default" | "secondary" | "outline";
+    className?: string;
+    sideLabel: string | null;
+  } {
+    if (engineFilter && game.engine_outcome) {
+      return {
+        label: getEngineOutcomeLabel(game.engine_outcome),
+        variant:
+          game.engine_outcome === "win"
+            ? "default"
+            : game.engine_outcome === "loss"
+              ? "secondary"
+              : "outline",
+        className:
+          game.engine_outcome === "win"
+            ? "bg-green-100 text-green-800 border-green-200"
+            : game.engine_outcome === "loss"
+              ? "bg-vermilion/10 text-vermilion border-vermilion/20"
+              : "",
+        sideLabel:
+          game.engine_side === "red"
+            ? "执红"
+            : game.engine_side === "black"
+              ? "执黑"
+              : null,
+      };
+    }
+
+    return {
+      label: getGameResultLabel(game.result),
+      variant:
+        game.result === "red"
+          ? "default"
+          : game.result === "black"
+            ? "secondary"
+            : "outline",
+      className:
+        game.result === "red"
+          ? "bg-vermilion/15 text-vermilion border-vermilion/20"
+          : game.result === "black"
+            ? "bg-ink/10 text-ink border-ink/20"
+            : "",
+      sideLabel: null,
+    };
   }
 
   return (
@@ -163,7 +256,9 @@ export default function GamesPage() {
                 onValueChange={(v) => setEngineFilter(v ?? "")}
               >
                 <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="全部引擎" />
+                  <span className="flex flex-1 text-left line-clamp-1">
+                    {engineLabel}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">全部引擎</SelectItem>
@@ -176,20 +271,67 @@ export default function GamesPage() {
               </Select>
             </div>
 
-            {/* Result filter */}
+            {/* Outcome filter */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm text-ink-muted">结果</label>
+              <label className="text-sm text-ink-muted">模型结果</label>
               <Select
-                value={resultFilter}
-                onValueChange={(v) => setResultFilter(v ?? "")}
+                value={outcomeFilter}
+                onValueChange={(v) => setOutcomeFilter(v ?? "")}
               >
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="全部" />
+                <SelectTrigger className="w-[140px]" disabled={!engineFilter}>
+                  <span className="flex flex-1 text-left line-clamp-1">
+                    {outcomeLabel}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(RESULT_LABELS).map(([val, label]) => (
+                  {Object.entries(OUTCOME_LABELS).map(([val, label]) => (
                     <SelectItem key={val} value={val}>
                       {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Board result filter */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-ink-muted">棋局结果</label>
+              <Select
+                value={boardResultFilter}
+                onValueChange={(v) => setBoardResultFilter(v ?? "")}
+              >
+                <SelectTrigger className="w-[140px]">
+                  <span className="flex flex-1 text-left line-clamp-1">
+                    {boardResultLabel}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(BOARD_RESULT_LABELS).map(([val, label]) => (
+                    <SelectItem key={val} value={val}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Termination filter */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-ink-muted">终局原因</label>
+              <Select
+                value={resultCodeFilter}
+                onValueChange={(v) => setResultCodeFilter(v ?? "")}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <span className="flex flex-1 text-left line-clamp-1">
+                    {resultCodeLabel}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">全部原因</SelectItem>
+                  {RESULT_CODE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -220,7 +362,7 @@ export default function GamesPage() {
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm text-ink-muted">
             共 {total} 局
-            {(engineFilter || resultFilter) && "（已筛选）"}
+            {(engineFilter || boardResultFilter || outcomeFilter || resultCodeFilter) && "（已筛选）"}
           </p>
         </div>
 
@@ -242,55 +384,54 @@ export default function GamesPage() {
                 <TableHead>红方</TableHead>
                 <TableHead>黑方</TableHead>
                 <TableHead>结果</TableHead>
+                <TableHead>原因</TableHead>
                 <TableHead>时间</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {games.map((g) => (
-                <TableRow key={g.id}>
-                  <TableCell className="font-medium text-vermilion">
-                    {g.red_engine_name}
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    {g.black_engine_name}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        g.result === "red"
-                          ? "default"
-                          : g.result === "black"
-                            ? "secondary"
-                            : "outline"
-                      }
-                      className={
-                        g.result === "red"
-                          ? "bg-vermilion/15 text-vermilion border-vermilion/20"
-                          : g.result === "black"
-                            ? "bg-ink/10 text-ink border-ink/20"
-                            : ""
-                      }
-                    >
-                      {g.result === "red"
-                        ? "红胜"
-                        : g.result === "black"
-                          ? "黑胜"
-                          : "和棋"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-ink-muted text-xs">
-                    {formatDate(g.finished_at)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Link href={`/games/${g.id}`}>
-                      <Button variant="ghost" size="sm">
-                        查看
-                      </Button>
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {games.map((g) => {
+                const badge = getResultBadge(g);
+                return (
+                  <TableRow key={g.id}>
+                    <TableCell className="font-medium text-vermilion">
+                      {g.red_engine_name}
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {g.black_engine_name}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={badge.variant} className={badge.className}>
+                          {badge.label}
+                        </Badge>
+                        {badge.sideLabel && (
+                          <Badge variant="outline" className="text-xs">
+                            {badge.sideLabel}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="max-w-[220px] text-sm text-ink-muted">
+                      {translateResult(
+                        g.result_code,
+                        g.result_reason,
+                        g.result_detail,
+                      ) || "-"}
+                    </TableCell>
+                    <TableCell className="text-ink-muted text-xs">
+                      {formatDate(g.finished_at)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Link href={`/games/${g.id}`}>
+                        <Button variant="ghost" size="sm">
+                          查看
+                        </Button>
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}

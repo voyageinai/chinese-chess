@@ -123,7 +123,7 @@ Every game termination stores `result_code`, `result_reason`, and `result_detail
 2. **Eval is always red-perspective** — Black engine eval is sign-flipped before storage. Don't flip again when displaying.
 3. **Engine init timeout is 10 seconds** — Failure auto-forfeits; no exception thrown, result returned with empty moves.
 4. **Default engine seeding checks executable bit** (`X_OK`) to distinguish binaries from .nnue/.md files.
-5. **`MAX_CONCURRENT_MATCHES = 1`** is hardcoded in `tournament.ts` — despite `.env.example` showing `2`, the code does not read this env var. SQLite WAL would contend under concurrent writes.
+5. **`MAX_CONCURRENT_MATCHES`** defaults to `2` in `tournament.ts`, read from env var. A **global semaphore** limits total concurrent matches across all tournaments/quick-matches system-wide. On a 4-core VPS, keep this at 2 (each match spawns 2 engine processes). SQLite WAL with `busy_timeout=5000` handles the write contention at this level.
 6. **Pikafish needs matching NNUE version** — Mismatched `pikafish.nnue` causes segfault, not a graceful error.
 7. **Halfmove clock resets on captures only** — Unlike chess, pawn/soldier moves do NOT reset the clock in xiangqi. This is implemented in `rules.ts:applyMove()`.
 8. **Time increment is added after move validation** — Ensures engines that return illegal/invalid moves don't get credited with bonus time.
