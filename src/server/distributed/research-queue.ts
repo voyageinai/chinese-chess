@@ -79,6 +79,7 @@ export function pollResearchTask(workerId: string): ResearchTask | null {
       movetime: requireNumber(jobParams.movetime, 80),
       selfplayMovetime: requireNumber(jobParams.selfplayMovetime, 50),
       analysisMovetime: requireNumber(jobParams.analysisMovetime, 80),
+      maxTime: typeof jobParams.maxTime === "number" ? jobParams.maxTime : undefined,
     },
   };
 }

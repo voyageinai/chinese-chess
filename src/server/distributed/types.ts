@@ -48,6 +48,7 @@ export interface ResearchTaskParams {
   movetime?: number;
   selfplayMovetime?: number;
   analysisMovetime?: number;
+  maxTime?: number;
 }
 
 export interface ResearchTask {

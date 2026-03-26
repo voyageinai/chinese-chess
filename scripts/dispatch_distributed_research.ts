@@ -11,6 +11,7 @@ interface Options {
   analysisMovetime: number;
   policyOutput: string;
   balancedOutput: string;
+  maxTime: number | null;
   wait: boolean;
 }
 
@@ -29,6 +30,7 @@ function parseArgs(): Options {
     analysisMovetime: parseInt(read("analysis-movetime", "80"), 10),
     policyOutput: read("policy-output", "autoresearch/models/policy_v12_20k.npz"),
     balancedOutput: read("balanced-output", "autoresearch/models/balanced_v2_20k.npz"),
+    maxTime: read("max-time", "") ? parseInt(read("max-time", ""), 10) : null,
     wait: args.includes("--wait"),
   };
 }
@@ -65,6 +67,7 @@ async function main() {
     params: {
       teacherEngineId: teacher.id,
       movetime: opts.policyMovetime,
+      ...(opts.maxTime != null ? { maxTime: opts.maxTime } : {}),
     },
   });
   const balancedJob = queries.createResearchJob({
@@ -77,6 +80,7 @@ async function main() {
       teacherEngineId: teacher.id,
       selfplayMovetime: opts.selfplayMovetime,
       analysisMovetime: opts.analysisMovetime,
+      ...(opts.maxTime != null ? { maxTime: opts.maxTime } : {}),
     },
   });
 

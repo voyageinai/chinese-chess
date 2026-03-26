@@ -39,26 +39,27 @@ function buildCommand(
     };
   }
 
-  return {
-    cmd: "python3",
-    args: [
-      "scripts/generate_balanced_data.py",
-      "--positions",
-      String(task.params.positions),
-      "--selfplay-movetime",
-      String(task.params.selfplayMovetime ?? 50),
-      "--analysis-movetime",
-      String(task.params.analysisMovetime ?? 80),
-      "--workers",
-      "1",
-      "--seed",
-      String(task.params.seed),
-      "--engine",
-      teacherPath,
-      "--output",
-      outputPath,
-    ],
-  };
+  const balancedArgs = [
+    "scripts/generate_balanced_data.py",
+    "--positions",
+    String(task.params.positions),
+    "--selfplay-movetime",
+    String(task.params.selfplayMovetime ?? 50),
+    "--analysis-movetime",
+    String(task.params.analysisMovetime ?? 80),
+    "--workers",
+    "1",
+    "--seed",
+    String(task.params.seed),
+    "--engine",
+    teacherPath,
+    "--output",
+    outputPath,
+  ];
+  if (task.params.maxTime != null) {
+    balancedArgs.push("--max-time", String(task.params.maxTime));
+  }
+  return { cmd: "python3", args: balancedArgs };
 }
 
 export async function executeResearchTask(
