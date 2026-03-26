@@ -7,6 +7,7 @@ interface Engine {
   id: string;
   user_id: string;
   name: string;
+  filename: string;
   visibility: string;
   status: "active" | "disabled";
   elo: number;
@@ -66,6 +67,7 @@ export default function AdminEnginesPage() {
           <thead>
             <tr className="border-b border-paper-300 text-left text-ink-muted">
               <th className="pb-2 pr-4">名称</th>
+              <th className="pb-2 pr-4">文件名</th>
               <th className="pb-2 pr-4">可见性</th>
               <th className="pb-2 pr-4">状态</th>
               <th className="pb-2 pr-4">Elo</th>
@@ -77,6 +79,7 @@ export default function AdminEnginesPage() {
             {engines.map((e) => (
               <tr key={e.id} className="border-b border-paper-200">
                 <td className="py-3 pr-4 text-ink">{e.name}</td>
+                <td className="py-3 pr-4 text-ink-muted font-mono text-xs">{e.filename}</td>
                 <td className="py-3 pr-4 text-ink-muted">{e.visibility}</td>
                 <td className="py-3 pr-4">
                   <span

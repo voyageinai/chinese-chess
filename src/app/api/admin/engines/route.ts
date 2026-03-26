@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { getAllEngines } from "@/db/queries";
 import { denyUnauth, denyForbidden, isAdmin } from "@/server/permissions";
-import { sanitizeEngines } from "@/server/dto";
+import { sanitizeEnginesForAdmin } from "@/server/dto";
 
 export async function GET() {
   try {
@@ -11,7 +11,7 @@ export async function GET() {
     if (!isAdmin(user)) return denyForbidden();
 
     const engines = getAllEngines();
-    return NextResponse.json({ engines: sanitizeEngines(engines) });
+    return NextResponse.json({ engines: sanitizeEnginesForAdmin(engines) });
   } catch (error) {
     console.error("Admin get engines error:", error);
     return NextResponse.json(
