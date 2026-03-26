@@ -90,17 +90,20 @@ interface WsOptions {
   maxRetries?: number;
 }
 
-function createReconnectingWs(options: WsOptions): { close: () => void } {
+function createReconnectingWs(options: WsOptions): { close: () => void; connected: Promise<void> } {
   const { url, onMessage, onConnected, maxRetries = 3 } = options;
   let retries = 0;
   let ws: WebSocket;
   let closed = false;
+  let resolveConnected: () => void;
+  const connected = new Promise<void>((r) => { resolveConnected = r; });
 
   function connect() {
     ws = new WebSocket(url);
 
     ws.on("open", () => {
       retries = 0; // reset on successful connection
+      resolveConnected();
       onConnected?.();
     });
 
@@ -137,6 +140,7 @@ function createReconnectingWs(options: WsOptions): { close: () => void } {
       closed = true;
       ws?.close();
     },
+    connected,
   };
 }
 
@@ -194,38 +198,8 @@ async function main() {
   console.log(`\n引擎: ${engineName} (${engineAbsPath})`);
   console.log(`时间: ${base}+${inc}s | 每对手 ${gamesPerOpponent} 局, 共 ${gamesPerOpponent * againstNames.length} 局`);
 
-  // Step 2: Upload engine and create sandbox test
-  console.log("\n上传引擎到集群...");
-  const fileBuffer = readFileSync(engineAbsPath);
-  const formData = new FormData();
-  formData.append("engine", new Blob([fileBuffer]), engineFilename);
-  formData.append("engineName", engineName);
-  formData.append("opponentIds", opponentIds.join(","));
-  formData.append("games", String(gamesPerOpponent));
-  formData.append("timeBase", String(base));
-  formData.append("timeInc", String(inc));
-
-  const createRes = await fetch(`${opts.masterUrl}/api/internal/sandbox/test`, {
-    method: "POST",
-    headers: { "x-worker-secret": opts.secret },
-    body: formData,
-  });
-
-  if (!createRes.ok) {
-    const err = await createRes.text();
-    fail(`创建测试失败: ${err}`);
-  }
-
-  const testInfo = await createRes.json();
-  const totalGames: number = testInfo.gameCount;
-  console.log(`测试已创建: ${totalGames} 局, ${testInfo.timeControl}`);
-  console.log(`锦标赛ID: ${testInfo.tournamentId}`);
-
-  // Step 3: Connect WebSocket and stream results
+  // Step 2: Connect WebSocket FIRST, then create test (avoid missing early events)
   const wsUrl = opts.masterUrl.replace(/^http/, "ws") + "/ws";
-
-  const engineId: string = testInfo.engineId;
-  const tournamentId: string = testInfo.tournamentId;
 
   // Local result accumulation — no dependency on API fetch
   interface GameResult {
@@ -239,10 +213,12 @@ async function main() {
   const gameResults: GameResult[] = [];
   let gameCount = 0;
   let reportShown = false;
+  let totalGames = 0;
+  let engineId = "";
+  let tournamentId = "";
 
-  // Build engine name lookup
+  // Build engine name lookup (will be enriched after test creation)
   const nameMap = new Map<string, string>();
-  nameMap.set(engineId, engineName);
   for (let i = 0; i < opponentIds.length; i++) {
     nameMap.set(opponentIds[i], againstNames[i]);
   }
@@ -300,6 +276,51 @@ async function main() {
       }
     },
   });
+
+  // Wait for WebSocket to connect before creating the test
+  await wsHandle.connected;
+
+  // Step 3: Upload engine and create sandbox test
+  console.log("\n上传引擎到集群...");
+  const fileBuffer = readFileSync(engineAbsPath);
+  const formData = new FormData();
+  formData.append("engine", new Blob([fileBuffer]), engineFilename);
+  formData.append("engineName", engineName);
+  formData.append("opponentIds", opponentIds.join(","));
+  formData.append("games", String(gamesPerOpponent));
+  formData.append("timeBase", String(base));
+  formData.append("timeInc", String(inc));
+
+  const createRes = await fetch(`${opts.masterUrl}/api/internal/sandbox/test`, {
+    method: "POST",
+    headers: { "x-worker-secret": opts.secret },
+    body: formData,
+  });
+
+  if (!createRes.ok) {
+    const err = await createRes.text();
+    wsHandle.close();
+    fail(`创建测试失败: ${err}`);
+  }
+
+  const testInfo = await createRes.json();
+  totalGames = testInfo.gameCount;
+  engineId = testInfo.engineId;
+  tournamentId = testInfo.tournamentId;
+  nameMap.set(engineId, engineName);
+
+  console.log(`测试已创建: ${totalGames} 局, ${testInfo.timeControl}`);
+  console.log(`锦标赛ID: ${tournamentId}`);
+
+  // Timeout safety — account for potential concurrency (default 2)
+  const concurrency = parseInt(process.env.MAX_CONCURRENT_MATCHES || "2", 10);
+  const maxWait = (base * 2 + 60) * Math.ceil(totalGames / concurrency) * 1000;
+  setTimeout(() => {
+    if (!reportShown) {
+      console.log("\n超时，输出已有结果...");
+      showReport();
+    }
+  }, maxWait);
 
   function showReport() {
     if (reportShown) return;
@@ -364,16 +385,6 @@ async function main() {
     wsHandle.close();
     process.exit(0);
   }
-
-  // Timeout safety — account for potential concurrency (default 2)
-  const concurrency = parseInt(process.env.MAX_CONCURRENT_MATCHES || "2", 10);
-  const maxWait = (base * 2 + 60) * Math.ceil(totalGames / concurrency) * 1000;
-  setTimeout(() => {
-    if (!reportShown) {
-      console.log("\n超时，输出已有结果...");
-      showReport();
-    }
-  }, maxWait);
 }
 
 main().catch((err) => {
