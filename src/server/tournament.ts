@@ -11,7 +11,6 @@ import type { WsHub } from "./ws";
 import { createStrategy } from "./strategies";
 import type { RoundContext, Standing, BracketData } from "./strategies";
 import { KnockoutStrategy } from "./strategies";
-import { isDistributedEnabled } from "./distributed/auth";
 import type { ResultReport } from "./distributed/types";
 
 // ---------------------------------------------------------------------------
@@ -413,7 +412,7 @@ export class TournamentRunner extends EventEmitter {
     const unfinished = games.filter((g) => !g.result);
     if (unfinished.length === 0) return;
 
-    const distributed = isDistributedEnabled();
+    const distributed = !!process.env.WORKER_SECRET;
 
     const promises = unfinished.map(async (game) => {
       if (this.aborted) return;
