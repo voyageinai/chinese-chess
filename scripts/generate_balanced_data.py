@@ -40,7 +40,7 @@ from scripts.uci_teacher import UciTeacher
 PIKAFISH_PATH = str(ROOT / "data" / "default-engines" / "pikafish")
 RANDOM_OPENING_PLIES = 4
 MAX_GAME_MOVES = 250
-MAX_TIME_SEC = 1800
+MAX_TIME_SEC = 1800  # default; overridable via --max-time
 ENGINE_HASH_MB = 16
 SEED_STRIDE = 9973
 
@@ -343,6 +343,7 @@ def generate_balanced_data(
     seed: int = 42,
     workers: int = 1,
     engine_path: str = PIKAFISH_PATH,
+    max_time: int = MAX_TIME_SEC,
 ) -> None:
     if target_positions <= 0:
         raise ValueError("target_positions must be >= 1")
@@ -378,7 +379,7 @@ def generate_balanced_data(
             "selfplay_movetime": selfplay_movetime,
             "analysis_movetime": analysis_movetime,
             "seed": seed + idx * SEED_STRIDE,
-            "max_time": MAX_TIME_SEC,
+            "max_time": max_time,
         }
         configs.append(config)
         target_by_worker[idx] = worker_targets
@@ -512,6 +513,12 @@ if __name__ == "__main__":
         default=PIKAFISH_PATH,
         help="Path to Pikafish binary",
     )
+    parser.add_argument(
+        "--max-time",
+        type=int,
+        default=MAX_TIME_SEC,
+        help=f"Max wall-clock seconds per worker (default: {MAX_TIME_SEC})",
+    )
     args = parser.parse_args()
 
     generate_balanced_data(
@@ -522,4 +529,5 @@ if __name__ == "__main__":
         seed=args.seed,
         workers=args.workers,
         engine_path=args.engine,
+        max_time=args.max_time,
     )
