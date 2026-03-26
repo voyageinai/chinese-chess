@@ -3,10 +3,9 @@ import path from "path";
 import fs from "fs";
 import { nanoid } from "nanoid";
 import { SCHEMA } from "./schema";
+import { SANDBOX_USER_ID, SYSTEM_USER_ID } from "@/lib/service-users";
 
 let db: Database.Database | null = null;
-
-const SYSTEM_USER_ID = "__system__";
 const DEFAULT_DB_PATH = path.join(process.cwd(), "cnchess.db");
 
 export function getDb(dbPath?: string): Database.Database {
@@ -26,17 +25,29 @@ export function getDb(dbPath?: string): Database.Database {
 }
 
 function ensureSystemUser(database: Database.Database): void {
-  // Ensure system user exists (no password — cannot log in)
-  const sysUser = database
+  ensureServiceUser(database, SYSTEM_USER_ID, "系统默认", "admin");
+}
+
+function ensureServiceUser(
+  database: Database.Database,
+  id: string,
+  username: string,
+  role: "admin" | "user",
+): void {
+  const user = database
     .prepare("SELECT id FROM users WHERE id = ?")
-    .get(SYSTEM_USER_ID);
-  if (!sysUser) {
+    .get(id);
+  if (!user) {
     database
       .prepare(
         "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)",
       )
-      .run(SYSTEM_USER_ID, "系统默认", "!nologin", "admin");
+      .run(id, username, "!nologin", role);
   }
+}
+
+export function ensureSandboxUser(database?: Database.Database): void {
+  ensureServiceUser(database ?? getDb(), SANDBOX_USER_ID, "沙盒服务", "user");
 }
 
 function hasColumn(
@@ -53,21 +64,21 @@ function hasColumn(
 function pickDefaultTournamentOwner(database: Database.Database): string | null {
   const nonSystemAdmin = database
     .prepare(
-      "SELECT id FROM users WHERE role = 'admin' AND id != ? ORDER BY created_at ASC LIMIT 1",
+      "SELECT id FROM users WHERE role = 'admin' AND id NOT IN (?, ?) ORDER BY created_at ASC LIMIT 1",
     )
-    .get(SYSTEM_USER_ID) as { id: string } | undefined;
+    .get(SYSTEM_USER_ID, SANDBOX_USER_ID) as { id: string } | undefined;
   if (nonSystemAdmin) return nonSystemAdmin.id;
 
   const anyAdmin = database
     .prepare(
-      "SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1",
+      "SELECT id FROM users WHERE role = 'admin' AND id != ? ORDER BY created_at ASC LIMIT 1",
     )
-    .get() as { id: string } | undefined;
+    .get(SANDBOX_USER_ID) as { id: string } | undefined;
   if (anyAdmin) return anyAdmin.id;
 
   const anyUser = database
-    .prepare("SELECT id FROM users ORDER BY created_at ASC LIMIT 1")
-    .get() as { id: string } | undefined;
+    .prepare("SELECT id FROM users WHERE id != ? ORDER BY created_at ASC LIMIT 1")
+    .get(SANDBOX_USER_ID) as { id: string } | undefined;
   return anyUser?.id ?? null;
 }
 

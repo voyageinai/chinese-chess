@@ -14,6 +14,7 @@ import type {
 import type { Color } from "@/lib/types";
 import type { EngineOutcome } from "@/lib/results";
 import { getEnginePerspective } from "@/lib/results";
+import { SANDBOX_USER_ID, SYSTEM_USER_ID } from "@/lib/service-users";
 
 // ── Users ──────────────────────────────────────────────────────────────
 
@@ -95,8 +96,8 @@ export function createUser(username: string, passwordHash: string): User {
   // Wrap in transaction to prevent race condition on first-user admin assignment
   const insertUser = db.transaction(() => {
     const count = db
-      .prepare("SELECT COUNT(*) as cnt FROM users WHERE id != '__system__'")
-      .get() as { cnt: number };
+      .prepare("SELECT COUNT(*) as cnt FROM users WHERE id NOT IN (?, ?)")
+      .get(SYSTEM_USER_ID, SANDBOX_USER_ID) as { cnt: number };
     const role = count.cnt === 0 ? "admin" : "user";
 
     db.prepare(
@@ -243,9 +244,9 @@ export function getLeaderboard(): (Engine & { owner: string })[] {
   const db = getDb();
   return db
     .prepare(
-      "SELECT e.*, u.username as owner FROM engines e JOIN users u ON e.user_id = u.id WHERE e.status = 'active' ORDER BY e.elo DESC",
+      "SELECT e.*, u.username as owner FROM engines e JOIN users u ON e.user_id = u.id WHERE e.status = 'active' AND e.user_id != ? ORDER BY e.elo DESC",
     )
-    .all() as (Engine & { owner: string })[];
+    .all(SANDBOX_USER_ID) as (Engine & { owner: string })[];
 }
 
 // ── Elo History ────────────────────────────────────────────────────────
@@ -291,9 +292,9 @@ export function getLeaderboardWithDelta(): (Engine & { owner: string; elo_delta:
        LIMIT 1) as elo_delta
      FROM engines e
      JOIN users u ON e.user_id = u.id
-     WHERE e.status = 'active'
+     WHERE e.status = 'active' AND e.user_id != ?
      ORDER BY e.elo DESC`,
-  ).all() as (Engine & { owner: string; elo_delta: number | null })[];
+  ).all(SANDBOX_USER_ID) as (Engine & { owner: string; elo_delta: number | null })[];
   return engines;
 }
 
@@ -541,9 +542,9 @@ export function getAllUsers(): User[] {
   const db = getDb();
   return db
     .prepare(
-      "SELECT id, username, role, status, created_at FROM users WHERE id != '__system__' ORDER BY created_at DESC",
+      "SELECT id, username, role, status, created_at FROM users WHERE id NOT IN (?, ?) ORDER BY created_at DESC",
     )
-    .all() as User[];
+    .all(SYSTEM_USER_ID, SANDBOX_USER_ID) as User[];
 }
 
 export function updateUserRole(id: string, role: "admin" | "user"): void {
@@ -560,9 +561,9 @@ export function countActiveAdmins(): number {
   const db = getDb();
   const row = db
     .prepare(
-      "SELECT COUNT(*) as cnt FROM users WHERE role = 'admin' AND status = 'active' AND id != '__system__'",
+      "SELECT COUNT(*) as cnt FROM users WHERE role = 'admin' AND status = 'active' AND id NOT IN (?, ?)",
     )
-    .get() as { cnt: number };
+    .get(SYSTEM_USER_ID, SANDBOX_USER_ID) as { cnt: number };
   return row.cnt;
 }
 

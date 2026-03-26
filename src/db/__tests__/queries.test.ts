@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
-import { getDb, closeDb } from "../index";
+import { getDb, closeDb, ensureSandboxUser } from "../index";
 import {
   createUser,
   getUserByUsername,
   getUserById,
+  getAllUsers,
   createEngine,
   getEnginesByUser,
   getVisibleEngines,
@@ -73,6 +74,17 @@ describe("Users", () => {
     expect(fetched).toBeDefined();
     expect(fetched!.username).toBe("alice");
     expect((fetched as unknown as Record<string, unknown>)["password"]).toBeUndefined();
+  });
+
+  it("first human user still becomes admin after sandbox user exists", () => {
+    ensureSandboxUser(getDb(TEST_DB));
+    const user = createUser("alice", "hashedpw1");
+    expect(user.role).toBe("admin");
+  });
+
+  it("does not include service users in user listings", () => {
+    ensureSandboxUser(getDb(TEST_DB));
+    expect(getAllUsers()).toEqual([]);
   });
 });
 
