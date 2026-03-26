@@ -30,7 +30,12 @@ export async function GET(
     const entries = getTournamentEntries(id);
     const games = getGamesByTournament(id);
 
-    return NextResponse.json({ tournament, entries, games });
+    // Parse bracket data for knockout tournaments so client receives structured object
+    const bracketData = tournament.bracket_data
+      ? JSON.parse(tournament.bracket_data)
+      : null;
+
+    return NextResponse.json({ tournament, entries, games, bracketData });
   } catch (error) {
     console.error("Get tournament error:", error);
     return NextResponse.json(

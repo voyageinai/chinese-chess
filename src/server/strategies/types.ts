@@ -45,3 +45,23 @@ export interface RoundContext {
   completedGames: { redId: string; blackId: string; result: "red" | "black" | "draw" }[];
   openingFens?: string[];
 }
+
+// -- Bracket types for knockout tournaments --
+
+export interface BracketMatch {
+  round: number;        // 1-based
+  position: number;     // 0-based within round
+  engineA: string | null;
+  engineB: string | null;
+  winner: string | null;
+  isBye: boolean;
+  tiebreak: boolean;
+  gameIds: string[];
+}
+
+export interface BracketData {
+  bracketSize: number;   // power of 2 >= engine count
+  totalRounds: number;
+  seeds: string[];       // engineIds in seed order (index 0 = seed 1)
+  matches: BracketMatch[];
+}

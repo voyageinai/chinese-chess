@@ -127,7 +127,7 @@ async function handleMatchmaking(
     resolvedTimeInc,
     1,
     "quick_match",
-    isGauntlet ? "gauntlet" : "round_robin",
+    isGauntlet ? "gauntlet" : "swiss",
   );
 
   // Add all engines
@@ -143,7 +143,7 @@ async function handleMatchmaking(
     const color = randomColor();
     const [red, black] = color === "red" ? [engineId, oppId] : [oppId, engineId];
     const fen = openingFens.length > 0 ? openingFens[fenIndex++ % openingFens.length] : undefined;
-    const game = createGame(tournament.id, red, black, fen);
+    const game = createGame(tournament.id, red, black, fen, 1);
     gameIds.push(game.id);
   }
 

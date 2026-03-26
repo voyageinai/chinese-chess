@@ -95,88 +95,71 @@ describe("GauntletStrategy", () => {
   });
 });
 
-describe("KnockoutStrategy", () => {
+describe("KnockoutStrategy (bracket-based)", () => {
   const knockout = new KnockoutStrategy();
 
-  it("generates first round pairings for 4 engines", () => {
-    const pairings = knockout.generateNextRound!({
-      round: 1,
-      totalRounds: 2,
-      engineIds: ["A", "B", "C", "D"],
-      standings: [],
-      completedGames: [],
-    });
-    // 4 engines → 2 matchups × 2 games = 4
-    expect(pairings).toHaveLength(4);
+  it("initBracket: 4 engines → 2 round-1 matches ready", () => {
+    const bracket = knockout.initBracket(["A", "B", "C", "D"]);
+    const ready = knockout.getReadyMatches(bracket);
+    expect(ready).toHaveLength(2);
+    // Classic seeding: A vs D, B vs C
+    const r1 = bracket.matches.filter(m => m.round === 1);
+    expect(r1[0].engineA).toBe("A");
+    expect(r1[0].engineB).toBe("D");
+    expect(r1[1].engineA).toBe("B");
+    expect(r1[1].engineB).toBe("C");
   });
 
-  it("generates first round pairings for 3 engines (1 bye)", () => {
-    const pairings = knockout.generateNextRound!({
-      round: 1,
-      totalRounds: 2,
-      engineIds: ["A", "B", "C"],
-      standings: [],
-      completedGames: [],
-    });
-    // bracket size 4, 1 bye → only 2 engines play → 1 matchup × 2 games = 2
-    expect(pairings).toHaveLength(2);
-    // A gets bye (top seed), B vs C play
-    const participants = new Set(pairings!.flatMap(p => [p.red, p.black]));
-    expect(participants.has("A")).toBe(false);
-    expect(participants.has("B")).toBe(true);
-    expect(participants.has("C")).toBe(true);
+  it("initBracket: 3 engines → 1 bye for A, B vs C play", () => {
+    const bracket = knockout.initBracket(["A", "B", "C"]);
+    const ready = knockout.getReadyMatches(bracket);
+    expect(ready).toHaveLength(1);
+    // A gets bye
+    const byeMatch = bracket.matches.find(m => m.isBye);
+    expect(byeMatch?.winner).toBe("A");
+    // B vs C is the ready match
+    expect(ready[0].engineA).toBe("B");
+    expect(ready[0].engineB).toBe("C");
   });
 
-  it("advances winners to next round", () => {
-    // Round 1: A vs D (A wins), B vs C (B wins)
-    const pairings = knockout.generateNextRound!({
-      round: 2,
-      totalRounds: 2,
-      engineIds: ["A", "B", "C", "D"],
-      standings: [],
-      completedGames: [
-        { redId: "A", blackId: "D", result: "red" },
-        { redId: "D", blackId: "A", result: "black" },
-        { redId: "B", blackId: "C", result: "red" },
-        { redId: "C", blackId: "B", result: "black" },
-      ],
-    });
-    // A and B advance → 1 matchup × 2 games = 2
-    expect(pairings).toHaveLength(2);
-    const participants = new Set(pairings!.flatMap(p => [p.red, p.black]));
-    expect(participants.has("A")).toBe(true);
-    expect(participants.has("B")).toBe(true);
-    expect(participants.has("C")).toBe(false);
-    expect(participants.has("D")).toBe(false);
+  it("resolveMatch: winners advance to final", () => {
+    const bracket = knockout.initBracket(["A", "B", "C", "D"]);
+    // A beats D, B beats C
+    knockout.resolveMatch(bracket, 1, 0, "A", false);
+    knockout.resolveMatch(bracket, 1, 1, "B", false);
+
+    const final = bracket.matches.find(m => m.round === 2);
+    expect(final?.engineA).toBe("A");
+    expect(final?.engineB).toBe("B");
+
+    const ready = knockout.getReadyMatches(bracket);
+    expect(ready).toHaveLength(1);
+    expect(ready[0].round).toBe(2);
   });
 
-  it("4 engines: tournament needs exactly 2 rounds (log2(4))", () => {
-    // Round 1: 2 matchups (4 games)
-    const r1 = knockout.generateNextRound!({
-      round: 1,
-      totalRounds: 2,
-      engineIds: ["A", "B", "C", "D"],
-      standings: [],
-      completedGames: [],
-    });
-    expect(r1).toHaveLength(4);
+  it("4 engines: complete 2-round tournament lifecycle", () => {
+    const bracket = knockout.initBracket(["A", "B", "C", "D"]);
+    expect(bracket.totalRounds).toBe(2);
 
-    // Round 2 (final): A beat D, B beat C → A vs B
-    const r2 = knockout.generateNextRound!({
-      round: 2,
-      totalRounds: 2,
-      engineIds: ["A", "B", "C", "D"],
-      standings: [],
-      completedGames: [
-        { redId: "A", blackId: "D", result: "red" },
-        { redId: "D", blackId: "A", result: "black" },
-        { redId: "B", blackId: "C", result: "red" },
-        { redId: "C", blackId: "B", result: "black" },
-      ],
-    });
-    expect(r2).toHaveLength(2); // 1 matchup × 2 games
-    const finalPlayers = new Set(r2!.flatMap(p => [p.red, p.black]));
+    // Round 1
+    let ready = knockout.getReadyMatches(bracket);
+    expect(ready).toHaveLength(2);
+    ready[0].gameIds = ["g1", "g2"];
+    ready[1].gameIds = ["g3", "g4"];
+
+    knockout.resolveMatch(bracket, 1, 0, "A", false);
+    knockout.resolveMatch(bracket, 1, 1, "B", false);
+
+    // Final
+    ready = knockout.getReadyMatches(bracket);
+    expect(ready).toHaveLength(1);
+    const finalPlayers = new Set([ready[0].engineA, ready[0].engineB]);
     expect(finalPlayers).toEqual(new Set(["A", "B"]));
+
+    ready[0].gameIds = ["g5", "g6"];
+    knockout.resolveMatch(bracket, 2, 0, "A", false);
+    expect(knockout.isComplete(bracket)).toBe(true);
+    expect(knockout.getChampion(bracket)).toBe("A");
   });
 });
 

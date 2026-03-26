@@ -1,4 +1,4 @@
-export type { TournamentStrategy, TournamentFormat, PairingConfig, RoundContext, Standing } from "./types";
+export type { TournamentStrategy, TournamentFormat, PairingConfig, RoundContext, Standing, BracketData, BracketMatch } from "./types";
 export { RoundRobinStrategy } from "./round-robin";
 export { GauntletStrategy } from "./gauntlet";
 export { KnockoutStrategy } from "./knockout";

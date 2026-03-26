@@ -9,7 +9,8 @@ import { getTournaments } from "@/db/queries";
 import type { Engine, Game, Tournament } from "@/lib/types";
 import type { WsHub } from "./ws";
 import { createStrategy } from "./strategies";
-import type { RoundContext, Standing } from "./strategies";
+import type { RoundContext, Standing, BracketData } from "./strategies";
+import { KnockoutStrategy } from "./strategies";
 
 // ---------------------------------------------------------------------------
 // Pairing generation
@@ -65,8 +66,6 @@ export function loadOpeningFens(): string[] {
 // Tournament runner
 // ---------------------------------------------------------------------------
 
-const MAX_CONCURRENT_MATCHES = Math.max(1, parseInt(process.env.MAX_CONCURRENT_MATCHES || "1", 10));
-
 // ---------------------------------------------------------------------------
 // Semaphore — limits how many matches run concurrently
 // ---------------------------------------------------------------------------
@@ -93,6 +92,12 @@ class Semaphore {
     }
   }
 }
+
+const MAX_CONCURRENT_MATCHES = Math.max(1, parseInt(process.env.MAX_CONCURRENT_MATCHES || "2", 10));
+
+// Global semaphore — limits total concurrent matches across ALL tournaments
+const globalMatchSemaphore = new Semaphore(MAX_CONCURRENT_MATCHES);
+console.log(`[tournament] Global match concurrency: ${MAX_CONCURRENT_MATCHES}`);
 
 // ── Runner Registry (module-level singleton) ──────────────────────────
 
@@ -334,17 +339,16 @@ export class TournamentRunner extends EventEmitter {
     scores: Map<string, number>,
     tournament: Tournament,
   ): Promise<void> {
-    const sem = new Semaphore(MAX_CONCURRENT_MATCHES);
     const promises = games
       .filter((g) => !g.result)
       .map(async (game) => {
         if (this.aborted) return;
-        await sem.acquire();
+        await globalMatchSemaphore.acquire();
         try {
           if (this.aborted) return;
           await this.runOneGame(game, engines, scores, tournament);
         } finally {
-          sem.release();
+          globalMatchSemaphore.release();
         }
       });
     await Promise.all(promises);
@@ -400,80 +404,12 @@ export class TournamentRunner extends EventEmitter {
     // Check for existing games (resume after restart) or create new ones
     let existingGames = queries.getGamesByTournament(this.tournamentId);
 
-    if (strategy.isRoundBased()) {
-      // --- Round-based execution (knockout, swiss) ---
-      const scores = this.computeScores(existingGames, engineIds);
-      const totalRounds = format === "knockout"
-        ? Math.ceil(Math.log2(engineIds.length))
-        : tournament.rounds;
-
-      // Determine which round we're on by counting completed rounds
-      let currentRound = 1;
-      if (existingGames.length > 0) {
-        const maxRound = Math.max(...existingGames.map(g => (g as Game & { round?: number }).round ?? 1));
-        const allInRoundDone = existingGames
-          .filter(g => (g as Game & { round?: number }).round === maxRound)
-          .every(g => g.result);
-        currentRound = allInRoundDone ? maxRound + 1 : maxRound;
-      }
-
-      for (let round = currentRound; round <= totalRounds; round++) {
-        if (this.aborted) break;
-
-        // Check if this round's games already exist (resume)
-        let roundGames = existingGames.filter(g => (g as Game & { round?: number }).round === round);
-
-        if (roundGames.length === 0) {
-          // Generate pairings for this round
-          const completedGames = existingGames
-            .filter(g => g.result)
-            .map(g => ({ redId: g.red_engine_id, blackId: g.black_engine_id, result: g.result! }));
-
-          const standings: Standing[] = engineIds.map(eid => ({
-            engineId: eid,
-            score: scores.get(eid) ?? 0,
-            wins: completedGames.filter(g => (g.redId === eid && g.result === "red") || (g.blackId === eid && g.result === "black")).length,
-            losses: completedGames.filter(g => (g.redId === eid && g.result === "black") || (g.blackId === eid && g.result === "red")).length,
-            draws: completedGames.filter(g => (g.redId === eid || g.blackId === eid) && g.result === "draw").length,
-            opponents: completedGames.filter(g => g.redId === eid || g.blackId === eid).map(g => g.redId === eid ? g.blackId : g.redId),
-            colorHistory: completedGames.filter(g => g.redId === eid || g.blackId === eid).map(g => g.redId === eid ? "red" as const : "black" as const),
-          }));
-
-          const context: RoundContext = {
-            round,
-            totalRounds,
-            engineIds,
-            standings,
-            completedGames,
-            openingFens: openingFens.length > 0 ? openingFens : undefined,
-          };
-
-          const pairings = strategy.generateNextRound!(context);
-          if (!pairings || pairings.length === 0) break; // Tournament complete
-
-          for (const p of pairings) {
-            queries.createGame(this.tournamentId, p.red, p.black, p.startFen);
-          }
-          existingGames = queries.getGamesByTournament(this.tournamentId);
-          roundGames = existingGames.filter(g => !g.result);
-        }
-
-        await this.runGamesWithConcurrency(roundGames, engines, scores, tournament);
-
-        // Refresh scores after round
-        existingGames = queries.getGamesByTournament(this.tournamentId);
-        const updatedScores = this.computeScores(existingGames, engineIds);
-        for (const [k, v] of updatedScores) scores.set(k, v);
-      }
-
-      // Final rankings
-      const sortedEntries = [...scores.entries()].sort((a, b) => b[1] - a[1]);
-      let rank = 1;
-      for (let i = 0; i < sortedEntries.length; i++) {
-        const [engineId, score] = sortedEntries[i];
-        if (i > 0 && sortedEntries[i][1] < sortedEntries[i - 1][1]) rank = i + 1;
-        queries.updateTournamentEntry(this.tournamentId, engineId, score, rank);
-      }
+    if (strategy instanceof KnockoutStrategy) {
+      // --- Bracket-based execution (knockout) ---
+      await this.runBracketKnockout(strategy, engineIds, engines, tournament, openingFens, existingGames);
+    } else if (strategy.isRoundBased()) {
+      // --- Round-based execution (swiss) ---
+      await this.runRoundBased(strategy, engineIds, engines, tournament, openingFens, existingGames);
     } else {
       // --- Batch execution (round_robin, gauntlet) ---
       if (existingGames.length === 0) {
@@ -517,6 +453,240 @@ export class TournamentRunner extends EventEmitter {
 
     // Emit tournament_end
     this.emit("tournament_end", { type: "tournament_end", tournamentId: this.tournamentId });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bracket-based knockout execution
+  // ---------------------------------------------------------------------------
+
+  private async runBracketKnockout(
+    knockout: KnockoutStrategy,
+    engineIds: string[],
+    engines: Map<string, Engine>,
+    tournament: Tournament,
+    openingFens: string[],
+    existingGames: Game[],
+  ): Promise<void> {
+    const scores = this.computeScores(existingGames, engineIds);
+
+    // Load or create bracket
+    let bracket: BracketData;
+    if (tournament.bracket_data) {
+      bracket = JSON.parse(tournament.bracket_data) as BracketData;
+    } else {
+      // Seed by Elo descending — strongest engine = seed 1
+      const seededIds = [...engineIds].sort((a, b) => {
+        const eloA = engines.get(a)?.elo ?? 0;
+        const eloB = engines.get(b)?.elo ?? 0;
+        return eloB - eloA;
+      });
+      bracket = knockout.initBracket(seededIds);
+      queries.updateTournamentBracket(this.tournamentId, JSON.stringify(bracket));
+    }
+
+    // Sync phase: recover from crashes between game completion and bracket persist.
+    // 1) Match bracket gameIds to completed games that weren't resolved
+    const allGames = queries.getGamesByTournament(this.tournamentId);
+    const gameMap = new Map(allGames.map((g) => [g.id, g]));
+
+    // Orphan recovery: games in DB not referenced by any bracket match
+    const referencedIds = new Set(bracket.matches.flatMap((m) => m.gameIds));
+    const orphanGames = allGames.filter((g) => !referencedIds.has(g.id));
+    if (orphanGames.length > 0) {
+      for (const og of orphanGames) {
+        // Match orphan to bracket slot by engineA/engineB + round
+        // A match can hold up to 3 gameIds (2 regular + 1 decider)
+        const match = bracket.matches.find(
+          (m) =>
+            !m.isBye &&
+            m.winner === null &&
+            m.gameIds.length < 3 &&
+            m.round === og.round &&
+            m.engineA &&
+            m.engineB &&
+            ((og.red_engine_id === m.engineA && og.black_engine_id === m.engineB) ||
+              (og.red_engine_id === m.engineB && og.black_engine_id === m.engineA)),
+        );
+        if (match && !match.gameIds.includes(og.id)) {
+          match.gameIds.push(og.id);
+        }
+      }
+    }
+
+    // Resolve matches with all games completed but no winner
+    for (const match of bracket.matches) {
+      if (match.winner || match.isBye || match.gameIds.length < 2) continue;
+      const matchGames = match.gameIds.map((id) => gameMap.get(id)).filter(Boolean) as Game[];
+      if (matchGames.every((g) => g.result)) {
+        const { winner, tiebreak } = knockout.determineMatchWinner(
+          match,
+          matchGames.map((g) => ({ result: g.result!, redId: g.red_engine_id, blackId: g.black_engine_id })),
+          bracket.seeds,
+        );
+        if (winner) {
+          knockout.resolveMatch(bracket, match.round, match.position, winner, tiebreak);
+        }
+        // winner === null means needs decider — handled in main loop
+      }
+    }
+    queries.updateTournamentBracket(this.tournamentId, JSON.stringify(bracket));
+
+    // Main execution loop
+    let fenIndex = 0;
+    while (!this.aborted && !knockout.isComplete(bracket)) {
+      const readyMatches = knockout.getReadyMatches(bracket);
+      const unresolvedMatches = knockout.getUnresolvedMatches(bracket);
+
+      // Also find matches that need a decider game
+      const deciderMatches = bracket.matches.filter((m) => knockout.needsDecider(m));
+
+      if (readyMatches.length === 0 && unresolvedMatches.length === 0 && deciderMatches.length === 0) break;
+
+      // Create 2 regular games for new matches
+      for (const match of readyMatches) {
+        const fen = openingFens.length > 0
+          ? openingFens[fenIndex++ % openingFens.length]
+          : undefined;
+
+        const game1 = queries.createGame(
+          this.tournamentId, match.engineA!, match.engineB!, fen, match.round,
+        );
+        const game2 = queries.createGame(
+          this.tournamentId, match.engineB!, match.engineA!, fen, match.round,
+        );
+        match.gameIds = [game1.id, game2.id];
+      }
+
+      // Create 1 decider game for tied matches (lower seed = red)
+      for (const match of deciderMatches) {
+        const { red, black } = knockout.getDeciderColors(match, bracket.seeds);
+        const deciderGame = queries.createGame(
+          this.tournamentId, red, black, undefined, match.round,
+        );
+        match.gameIds.push(deciderGame.id);
+      }
+
+      queries.updateTournamentBracket(this.tournamentId, JSON.stringify(bracket));
+
+      // Collect all unfinished games from ready + unresolved + decider matches
+      const activeMatches = [...readyMatches, ...unresolvedMatches, ...deciderMatches];
+      const allMatchGameIds = activeMatches.flatMap((m) => m.gameIds);
+      const gamesToRun = allMatchGameIds
+        .map((id) => queries.getGameById(id)!)
+        .filter((g) => g && !g.result);
+
+      if (gamesToRun.length > 0) {
+        await this.runGamesWithConcurrency(gamesToRun, engines, scores, tournament);
+      }
+
+      // Resolve completed matches and propagate winners
+      const freshGames = queries.getGamesByTournament(this.tournamentId);
+      const freshMap = new Map(freshGames.map((g) => [g.id, g]));
+
+      for (const match of bracket.matches) {
+        if (match.winner || match.isBye || match.gameIds.length < 2) continue;
+        const matchGames = match.gameIds.map((id) => freshMap.get(id)).filter(Boolean) as Game[];
+        if (!matchGames.every((g) => g.result)) continue;
+
+        const { winner, tiebreak } = knockout.determineMatchWinner(
+          match,
+          matchGames.map((g) => ({ result: g.result!, redId: g.red_engine_id, blackId: g.black_engine_id })),
+          bracket.seeds,
+        );
+        if (winner) {
+          knockout.resolveMatch(bracket, match.round, match.position, winner, tiebreak);
+        }
+        // winner === null → needsDecider will catch it next iteration
+      }
+      queries.updateTournamentBracket(this.tournamentId, JSON.stringify(bracket));
+    }
+
+    // Final rankings from bracket
+    const rankings = knockout.getRankings(bracket);
+    for (const [engineId, rank] of rankings) {
+      const score = scores.get(engineId) ?? 0;
+      queries.updateTournamentEntry(this.tournamentId, engineId, score, rank);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Round-based execution (swiss) — preserved from original code
+  // ---------------------------------------------------------------------------
+
+  private async runRoundBased(
+    strategy: { generateNextRound?(context: RoundContext): Pairing[] | null },
+    engineIds: string[],
+    engines: Map<string, Engine>,
+    tournament: Tournament,
+    openingFens: string[],
+    existingGames: Game[],
+  ): Promise<void> {
+    const scores = this.computeScores(existingGames, engineIds);
+    const totalRounds = tournament.rounds;
+
+    let currentRound = 1;
+    if (existingGames.length > 0) {
+      const maxRound = Math.max(...existingGames.map((g) => g.round ?? 1));
+      const allInRoundDone = existingGames
+        .filter((g) => g.round === maxRound)
+        .every((g) => g.result);
+      currentRound = allInRoundDone ? maxRound + 1 : maxRound;
+    }
+
+    for (let round = currentRound; round <= totalRounds; round++) {
+      if (this.aborted) break;
+
+      let roundGames = existingGames.filter((g) => g.round === round);
+
+      if (roundGames.length === 0) {
+        const completedGames = existingGames
+          .filter((g) => g.result)
+          .map((g) => ({ redId: g.red_engine_id, blackId: g.black_engine_id, result: g.result! }));
+
+        const standings: Standing[] = engineIds.map((eid) => ({
+          engineId: eid,
+          score: scores.get(eid) ?? 0,
+          wins: completedGames.filter((g) => (g.redId === eid && g.result === "red") || (g.blackId === eid && g.result === "black")).length,
+          losses: completedGames.filter((g) => (g.redId === eid && g.result === "black") || (g.blackId === eid && g.result === "red")).length,
+          draws: completedGames.filter((g) => (g.redId === eid || g.blackId === eid) && g.result === "draw").length,
+          opponents: completedGames.filter((g) => g.redId === eid || g.blackId === eid).map((g) => g.redId === eid ? g.blackId : g.redId),
+          colorHistory: completedGames.filter((g) => g.redId === eid || g.blackId === eid).map((g) => g.redId === eid ? "red" as const : "black" as const),
+        }));
+
+        const context: RoundContext = {
+          round,
+          totalRounds,
+          engineIds,
+          standings,
+          completedGames,
+          openingFens: openingFens.length > 0 ? openingFens : undefined,
+        };
+
+        const pairings = strategy.generateNextRound!(context);
+        if (!pairings || pairings.length === 0) break;
+
+        for (const p of pairings) {
+          queries.createGame(this.tournamentId, p.red, p.black, p.startFen, round);
+        }
+        existingGames = queries.getGamesByTournament(this.tournamentId);
+        roundGames = existingGames.filter((g) => !g.result);
+      }
+
+      await this.runGamesWithConcurrency(roundGames, engines, scores, tournament);
+
+      existingGames = queries.getGamesByTournament(this.tournamentId);
+      const updatedScores = this.computeScores(existingGames, engineIds);
+      for (const [k, v] of updatedScores) scores.set(k, v);
+    }
+
+    // Final rankings
+    const sortedEntries = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+    let rank = 1;
+    for (let i = 0; i < sortedEntries.length; i++) {
+      const [engineId, score] = sortedEntries[i];
+      if (i > 0 && sortedEntries[i][1] < sortedEntries[i - 1][1]) rank = i + 1;
+      queries.updateTournamentEntry(this.tournamentId, engineId, score, rank);
+    }
   }
 
   abort(): void {
