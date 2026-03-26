@@ -99,6 +99,7 @@ export interface Tournament {
   rounds: number;
   created_at: number;
   finished_at: number | null;
+  bracket_data: string | null;
 }
 
 export interface TournamentEntry {

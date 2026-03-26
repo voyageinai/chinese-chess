@@ -1,6 +1,31 @@
 import type { Color, ResultCode } from "./types";
 
 export type ResultDetail = Record<string, string | number | boolean | null>;
+export type EngineOutcome = "win" | "loss" | "draw";
+
+export const RESULT_CODE_LABELS_ZH: Record<ResultCode, string> = {
+  king_capture: "吃将胜",
+  checkmate: "将杀",
+  stalemate: "困毙",
+  perpetual_check: "长将判负",
+  mutual_perpetual_check: "双方长将判和",
+  perpetual_chase: "长捉判负",
+  mutual_perpetual_chase: "双方长捉判和",
+  repetition: "重复局面",
+  natural_move_limit: "自然限着",
+  time_forfeit: "超时判负",
+  illegal_move: "非法着法",
+  invalid_move: "无效着法",
+  engine_crash: "引擎崩溃",
+  engine_init_failed: "引擎启动失败",
+  engine_no_response: "引擎无响应",
+  game_aborted: "对局中止",
+  internal_error: "系统异常",
+};
+
+export const RESULT_CODE_OPTIONS = Object.entries(RESULT_CODE_LABELS_ZH).map(
+  ([value, label]) => ({ value: value as ResultCode, label }),
+);
 
 function toTitleSide(side: Color): string {
   return side === "red" ? "Red" : "Black";
@@ -73,6 +98,51 @@ export function formatResultReason(
     case "internal_error":
       return "Internal error";
   }
+}
+
+export function getResultCodeLabel(code: ResultCode): string {
+  return RESULT_CODE_LABELS_ZH[code];
+}
+
+export function getGameResultLabel(result: "red" | "black" | "draw"): string {
+  switch (result) {
+    case "red":
+      return "红胜";
+    case "black":
+      return "黑胜";
+    case "draw":
+      return "和棋";
+  }
+}
+
+export function getEngineOutcomeLabel(outcome: EngineOutcome): string {
+  switch (outcome) {
+    case "win":
+      return "胜";
+    case "loss":
+      return "负";
+    case "draw":
+      return "和";
+  }
+}
+
+export function getEnginePerspective(
+  engineId: string | null | undefined,
+  redEngineId: string,
+  blackEngineId: string,
+  result: "red" | "black" | "draw" | null,
+): { side: Color; outcome: EngineOutcome | null } | null {
+  if (!engineId) return null;
+  if (engineId !== redEngineId && engineId !== blackEngineId) return null;
+
+  const side: Color = engineId === redEngineId ? "red" : "black";
+  if (!result) return { side, outcome: null };
+  if (result === "draw") return { side, outcome: "draw" };
+
+  return {
+    side,
+    outcome: result === side ? "win" : "loss",
+  };
 }
 
 const LEGACY_REASON_ZH: Record<string, string> = {

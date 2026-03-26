@@ -11,6 +11,9 @@ import type {
   AuditLog,
   InviteCode,
 } from "@/lib/types";
+import type { Color } from "@/lib/types";
+import type { EngineOutcome } from "@/lib/results";
+import { getEnginePerspective } from "@/lib/results";
 
 // ── Users ──────────────────────────────────────────────────────────────
 
@@ -251,6 +254,16 @@ export function getTournamentById(id: string): Tournament | undefined {
     .get(id) as Tournament | undefined;
 }
 
+export function updateTournamentBracket(
+  id: string,
+  bracketData: string,
+): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE tournaments SET bracket_data = ? WHERE id = ?",
+  ).run(bracketData, id);
+}
+
 export function updateTournamentStatus(
   id: string,
   status: Tournament["status"],
@@ -326,13 +339,14 @@ export function createGame(
   redEngineId: string,
   blackEngineId: string,
   openingFen?: string,
+  round?: number,
 ): Game {
   const db = getDb();
   const id = nanoid();
 
   db.prepare(
-    "INSERT INTO games (id, tournament_id, red_engine_id, black_engine_id, opening_fen) VALUES (?, ?, ?, ?, ?)",
-  ).run(id, tournamentId, redEngineId, blackEngineId, openingFen ?? null);
+    "INSERT INTO games (id, tournament_id, red_engine_id, black_engine_id, opening_fen, round) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(id, tournamentId, redEngineId, blackEngineId, openingFen ?? null, round ?? null);
 
   return getGameById(id)!;
 }
@@ -554,15 +568,28 @@ export function deleteInviteCode(code: string): boolean {
 
 // ── Game Search ──────────────────────────────────────────────────────
 
+export interface SearchGameRow extends Game {
+  red_engine_name: string;
+  black_engine_name: string;
+  engine_side: Color | null;
+  engine_outcome: EngineOutcome | null;
+}
+
 export function searchGames(opts: {
   engineId?: string;
   result?: "red" | "black" | "draw";
+  outcome?: EngineOutcome;
+  resultCode?: ResultCode;
   limit?: number;
   offset?: number;
-}): { games: (Game & { red_engine_name: string; black_engine_name: string })[], total: number } {
+}): { games: SearchGameRow[]; total: number } {
   const db = getDb();
   const conditions: string[] = ["g.result IS NOT NULL"]; // only finished games
   const params: unknown[] = [];
+
+  if (opts.outcome && !opts.engineId) {
+    throw new Error("searchGames outcome filter requires engineId");
+  }
 
   if (opts.engineId) {
     conditions.push("(g.red_engine_id = ? OR g.black_engine_id = ?)");
@@ -571,6 +598,25 @@ export function searchGames(opts: {
   if (opts.result) {
     conditions.push("g.result = ?");
     params.push(opts.result);
+  }
+  if (opts.outcome) {
+    if (opts.outcome === "draw") {
+      conditions.push("g.result = 'draw'");
+    } else if (opts.outcome === "win") {
+      conditions.push(
+        "((g.red_engine_id = ? AND g.result = 'red') OR (g.black_engine_id = ? AND g.result = 'black'))",
+      );
+      params.push(opts.engineId, opts.engineId);
+    } else if (opts.outcome === "loss") {
+      conditions.push(
+        "((g.red_engine_id = ? AND g.result = 'black') OR (g.black_engine_id = ? AND g.result = 'red'))",
+      );
+      params.push(opts.engineId, opts.engineId);
+    }
+  }
+  if (opts.resultCode) {
+    conditions.push("g.result_code = ?");
+    params.push(opts.resultCode);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -581,7 +627,7 @@ export function searchGames(opts: {
     `SELECT COUNT(*) as cnt FROM games g ${where}`
   ).get(...params) as { cnt: number };
 
-  const games = db.prepare(
+  const rawGames = db.prepare(
     `SELECT g.*, re.name as red_engine_name, be.name as black_engine_name
      FROM games g
      JOIN engines re ON g.red_engine_id = re.id
@@ -589,7 +635,24 @@ export function searchGames(opts: {
      ${where}
      ORDER BY g.finished_at DESC
      LIMIT ? OFFSET ?`
-  ).all(...params, limit, offset) as (Game & { red_engine_name: string; black_engine_name: string })[];
+  ).all(...params, limit, offset) as (Game & {
+    red_engine_name: string;
+    black_engine_name: string;
+  })[];
+
+  const games = rawGames.map((game) => {
+    const perspective = getEnginePerspective(
+      opts.engineId,
+      game.red_engine_id,
+      game.black_engine_id,
+      game.result,
+    );
+    return {
+      ...game,
+      engine_side: perspective?.side ?? null,
+      engine_outcome: perspective?.outcome ?? null,
+    };
+  });
 
   return { games, total: countRow.cnt };
 }

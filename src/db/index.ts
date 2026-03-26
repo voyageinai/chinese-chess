@@ -190,6 +190,11 @@ function runMigrations(database: Database.Database): void {
   if (!hasColumn(database, "games", "round")) {
     database.exec("ALTER TABLE games ADD COLUMN round INTEGER");
   }
+
+  // -- v8: Bracket data for knockout tournaments --
+  if (!hasColumn(database, "tournaments", "bracket_data")) {
+    database.exec("ALTER TABLE tournaments ADD COLUMN bracket_data TEXT");
+  }
 }
 
 function seedDefaultEngines(database: Database.Database): void {

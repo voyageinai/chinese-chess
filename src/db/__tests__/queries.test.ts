@@ -28,6 +28,7 @@ import {
   getGameById,
   getGamesByTournament,
   getActiveGames,
+  searchGames,
 } from "../queries";
 
 const TEST_DB = path.join(__dirname, "test.db");
@@ -257,5 +258,89 @@ describe("Games", () => {
     // Games by tournament
     const byTournament = getGamesByTournament(t.id);
     expect(byTournament).toHaveLength(1);
+  });
+
+  it("searches games by engine outcome and result code", () => {
+    const user = createUser("alice", "hashedpw1");
+    const e1 = createEngine(user.id, "Alpha", "/bin/a");
+    const e2 = createEngine(user.id, "Beta", "/bin/b");
+    const e3 = createEngine(user.id, "Gamma", "/bin/c");
+    const t = createTournament(user.id, "Match", 60, 0);
+    addEngineToTournament(t.id, e1.id);
+    addEngineToTournament(t.id, e2.id);
+    addEngineToTournament(t.id, e3.id);
+
+    const g1 = createGame(t.id, e1.id, e2.id);
+    const g2 = createGame(t.id, e2.id, e1.id);
+    const g3 = createGame(t.id, e1.id, e3.id);
+
+    updateGameResult(
+      g1.id,
+      "red",
+      "checkmate",
+      "Checkmate",
+      null,
+      "[]",
+      50,
+      45,
+    );
+    updateGameResult(
+      g2.id,
+      "black",
+      "time_forfeit",
+      "Red lost on time",
+      JSON.stringify({ side: "red" }),
+      "[]",
+      40,
+      52,
+    );
+    updateGameResult(
+      g3.id,
+      "draw",
+      "repetition",
+      "Repeated position",
+      null,
+      "[]",
+      30,
+      30,
+    );
+
+    const { games: allGames } = searchGames({ engineId: e1.id, limit: 10, offset: 0 });
+    expect(allGames).toHaveLength(3);
+
+    const alphaAsRed = allGames.find((g) => g.id === g1.id);
+    expect(alphaAsRed?.engine_side).toBe("red");
+    expect(alphaAsRed?.engine_outcome).toBe("win");
+
+    const alphaAsBlack = allGames.find((g) => g.id === g2.id);
+    expect(alphaAsBlack?.engine_side).toBe("black");
+    expect(alphaAsBlack?.engine_outcome).toBe("win");
+
+    const alphaDraw = allGames.find((g) => g.id === g3.id);
+    expect(alphaDraw?.engine_outcome).toBe("draw");
+
+    const { games: wins } = searchGames({
+      engineId: e1.id,
+      outcome: "win",
+      limit: 10,
+      offset: 0,
+    });
+    expect(wins).toHaveLength(2);
+    expect(wins.every((g) => g.engine_outcome === "win")).toBe(true);
+
+    const { games: byReason } = searchGames({
+      engineId: e1.id,
+      resultCode: "checkmate",
+      limit: 10,
+      offset: 0,
+    });
+    expect(byReason).toHaveLength(1);
+    expect(byReason[0].id).toBe(g1.id);
+  });
+
+  it("rejects engine outcome filters without engineId", () => {
+    expect(() =>
+      searchGames({ outcome: "win", limit: 10, offset: 0 }),
+    ).toThrow("searchGames outcome filter requires engineId");
   });
 });
