@@ -9,9 +9,14 @@ const apiClient = new ApiClient(config.masterUrl, config.workerSecret, config.wo
 const engineCache = new EngineCache(config.engineCacheDir, apiClient);
 
 let shuttingDown = false;
+let activeResearch = 0;
+const maxConcurrentResearch = Math.max(
+  1,
+  parseInt(process.env.MAX_CONCURRENT_RESEARCH || "1", 10),
+);
 
 console.log(
-  `[worker] Starting ${config.workerId} | master=${config.masterUrl} | concurrency=${config.maxConcurrentMatches}`,
+  `[worker] Starting ${config.workerId} | master=${config.masterUrl} | concurrency=${config.maxConcurrentMatches} | research=${maxConcurrentResearch}`,
 );
 
 // Graceful shutdown
@@ -45,18 +50,23 @@ async function workerLoop(slot: number): Promise<void> {
       continue;
     }
 
-    const researchTask = await apiClient.pollResearchTask();
-    if (researchTask) {
-      console.log(
-        `[worker:${slot}] Research ${researchTask.kind} shard ${researchTask.shardId} | positions=${researchTask.params.positions}`,
-      );
-      try {
-        await executeResearchTask(researchTask, apiClient, engineCache, config);
-        console.log(`[worker:${slot}] Research shard ${researchTask.shardId} completed`);
-      } catch (err) {
-        console.error(`[worker:${slot}] Research shard ${researchTask.shardId} failed:`, err);
+    if (activeResearch < maxConcurrentResearch) {
+      const researchTask = await apiClient.pollResearchTask();
+      if (researchTask) {
+        activeResearch++;
+        console.log(
+          `[worker:${slot}] Research ${researchTask.kind} shard ${researchTask.shardId} | positions=${researchTask.params.positions} (research ${activeResearch}/${maxConcurrentResearch})`,
+        );
+        try {
+          await executeResearchTask(researchTask, apiClient, engineCache, config);
+          console.log(`[worker:${slot}] Research shard ${researchTask.shardId} completed`);
+        } catch (err) {
+          console.error(`[worker:${slot}] Research shard ${researchTask.shardId} failed:`, err);
+        } finally {
+          activeResearch--;
+        }
+        continue;
       }
-      continue;
     }
 
     // No work available, back off with jitter
