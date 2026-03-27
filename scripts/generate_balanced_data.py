@@ -13,12 +13,22 @@ from __future__ import annotations
 import argparse
 import multiprocessing as mp
 import random
+import signal
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
+
+# Graceful shutdown flag — set by SIGTERM/SIGINT, checked in worker loops
+_stop_requested = False
+
+
+def _request_stop(signum, frame):
+    global _stop_requested
+    _stop_requested = True
+    print(f"\n[signal {signum}] Graceful stop requested, finishing current game...", flush=True)
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -213,7 +223,7 @@ def _balanced_worker(config: dict) -> dict:
     play_engine.start()
     analysis_engine.start()
     try:
-        while not _all_targets_met(counts, targets) and (time.perf_counter() - t0) < int(config["max_time"]):
+        while not _stop_requested and not _all_targets_met(counts, targets) and (time.perf_counter() - t0) < int(config["max_time"]):
             game_count += 1
             board.load_fen(START_FEN)
 
@@ -350,6 +360,9 @@ def generate_balanced_data(
     if workers <= 0:
         raise ValueError("workers must be >= 1")
 
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+
     targets = _target_distribution(target_positions)
     print("Target distribution:")
     print(f"  Opening:    {targets['opening']}")
@@ -411,8 +424,7 @@ def generate_balanced_data(
                         f"{part['elapsed']:.0f}s"
                     )
     except KeyboardInterrupt:
-        print("\nInterrupted, waiting for running workers to stop...", flush=True)
-        raise
+        print("\nInterrupted, saving collected data...", flush=True)
 
     for part in sorted(parts, key=lambda item: item["worker_idx"]):
         game_count += int(part["games"])
