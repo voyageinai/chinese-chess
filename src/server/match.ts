@@ -18,7 +18,7 @@ import {
   type PlyMeta,
 } from "./judge";
 import { formatResultReason, stringifyResultDetail } from "@/lib/results";
-import { INITIAL_FEN, squareToUci } from "@/lib/constants";
+import { ENGINE_MAX_NODES, INITIAL_FEN, squareToUci } from "@/lib/constants";
 import { updateGameMoves } from "@/db/queries";
 import type { StoredMove, ResultCode } from "@/lib/types";
 import { EventEmitter } from "events";
@@ -161,6 +161,7 @@ export class Match extends EventEmitter {
           btime: blackTime,
           winc: timeInc,
           binc: timeInc,
+          maxNodes: ENGINE_MAX_NODES,
         };
 
         const moveStart = Date.now();

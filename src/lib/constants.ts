@@ -34,6 +34,15 @@ export function uciToSquare(uci: string): number {
   return makeSquare(row, col);
 }
 
+// Default time control (seconds) — platform-wide default, APIs still accept overrides
+export const DEFAULT_TIME_BASE = 1;
+export const DEFAULT_TIME_INC = 1;
+
+// Engine resource limits (platform-enforced, not user-configurable)
+// Caps per-move search nodes to equalize native C++ vs scripted (JS/Python) engines.
+// Native engines (~1.5M nps) get hard-capped; script engines (~10K nps) never reach it.
+export const ENGINE_MAX_NODES = 80000;
+
 // Piece char mapping (FEN)
 export const PIECE_CHARS: Record<string, { color: "red" | "black"; kind: string }> = {
   K: { color: "red", kind: "k" },

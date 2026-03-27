@@ -7,6 +7,7 @@ export interface GoOptions {
   btime: number;
   winc: number;
   binc: number;
+  maxNodes?: number;
 }
 
 export interface GoResult {
@@ -64,9 +65,11 @@ function parseRawUciMove(uci: string): {
  */
 function resolveSpawnArgs(enginePath: string): { cmd: string; args: string[] } {
   const ext = path.extname(enginePath).toLowerCase();
-  if (ext === ".py") return { cmd: "python3", args: [enginePath] };
-  if (ext === ".js") return { cmd: "node", args: [enginePath] };
-  return { cmd: enginePath, args: [] };
+  // nice -n 15: lower priority so Node.js server stays responsive
+  // taskset -c 2,3: pin engines to cores 2-3, leave 0-1 for server/system
+  if (ext === ".py") return { cmd: "nice", args: ["-n", "15", "taskset", "-c", "2,3", "python3", enginePath] };
+  if (ext === ".js") return { cmd: "nice", args: ["-n", "15", "taskset", "-c", "2,3", "node", enginePath] };
+  return { cmd: "nice", args: ["-n", "15", "taskset", "-c", "2,3", enginePath] };
 }
 
 export class UciEngine extends EventEmitter {
@@ -116,6 +119,10 @@ export class UciEngine extends EventEmitter {
       this.send("setoption name UCI_Variant value xiangqi");
     }
 
+    // Force single-threaded + small hash for fairness across engine types
+    this.send("setoption name Threads value 1");
+    this.send("setoption name Hash value 16");
+
     this.send("isready");
     await this.waitFor("readyok");
   }
@@ -153,9 +160,11 @@ export class UciEngine extends EventEmitter {
     // Normalize FEN piece letters: our internal format uses H(horse)/E(elephant)
     // but UCI standard (Pikafish, Fairy-Stockfish) uses N(knight)/B(bishop)
     this.send(fenToUci(positionCommand));
-    this.send(
-      `go wtime ${options.wtime} btime ${options.btime} winc ${options.winc} binc ${options.binc}`
-    );
+    let goCmd = `go wtime ${options.wtime} btime ${options.btime} winc ${options.winc} binc ${options.binc}`;
+    if (options.maxNodes && options.maxNodes > 0) {
+      goCmd += ` nodes ${options.maxNodes}`;
+    }
+    this.send(goCmd);
 
     let lastEval: number | null = null;
     let lastDepth: number | null = null;
@@ -171,10 +180,14 @@ export class UciEngine extends EventEmitter {
         this.off("line", handler);
       };
 
+      const maxTime = Math.max(
+        Math.max(options.wtime, options.btime) + Math.max(options.winc, options.binc) + 5000,
+        10000,
+      );
       const timeout = setTimeout(() => {
         cleanup();
         reject(new Error("Engine timed out waiting for bestmove"));
-      }, 60000);
+      }, maxTime);
 
       const handler = (line: string) => {
         if (line.startsWith("info ")) {
