@@ -81,6 +81,16 @@ export interface ResearchHeartbeatRequest {
   leaseId: string;
   workerId: string;
   progress: number;
+  positionsCollected?: number;
+  gamesPlayed?: number;
+}
+
+export type ShardCommand = "stop" | "cancel";
+
+export interface ResearchHeartbeatResponse {
+  ok: true;
+  leaseExpiresAt: number;
+  command?: ShardCommand;
 }
 
 export interface MoveReport {
@@ -124,6 +134,7 @@ export interface ResearchResultReport {
   status: "completed" | "failed";
   statsJson?: string | null;
   error?: string | null;
+  resultType?: "full" | "partial";
 }
 
 // ---------------------------------------------------------------------------

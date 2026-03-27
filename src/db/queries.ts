@@ -65,6 +65,10 @@ export interface ResearchShardRow {
   stats_json: string | null;
   error_text: string | null;
   finished_at: number | null;
+  pending_command: string | null;
+  progress_positions: number;
+  progress_games: number;
+  result_type: string | null;
 }
 
 export interface ResearchShardClaimRow extends ResearchShardRow {
@@ -1066,4 +1070,91 @@ export function markResearchJobFailed(jobId: string, errorText: string): void {
      SET status = 'failed', finished_at = COALESCE(finished_at, unixepoch()), error_text = ?
      WHERE id = ? AND status != 'completed'`,
   ).run(errorText, jobId);
+}
+
+// ── Worker Commands ────────────────────────────────────────────────────
+
+export function setShardPendingCommand(
+  shardId: string,
+  command: "stop" | "cancel",
+): boolean {
+  const db = getDb();
+  const result = db.prepare(
+    `UPDATE research_shards
+     SET pending_command = ?
+     WHERE id = ? AND status = 'running'`,
+  ).run(command, shardId);
+  if (result.changes > 0) {
+    db.prepare(
+      `INSERT INTO worker_commands (id, target_type, target_id, command)
+       VALUES (?, 'shard', ?, ?)`,
+    ).run(nanoid(), shardId, command);
+  }
+  return result.changes > 0;
+}
+
+export function setJobPendingCommand(
+  jobId: string,
+  command: "stop" | "cancel",
+): number {
+  const shards = getResearchShardsByJob(jobId);
+  let affected = 0;
+  for (const shard of shards) {
+    if (shard.status === "running") {
+      if (setShardPendingCommand(shard.id, command)) affected++;
+    }
+  }
+  return affected;
+}
+
+export function clearShardPendingCommand(shardId: string): void {
+  const db = getDb();
+  db.prepare(
+    "UPDATE research_shards SET pending_command = NULL WHERE id = ?",
+  ).run(shardId);
+}
+
+export function updateShardProgress(
+  shardId: string,
+  leaseId: string,
+  positions: number,
+  games: number,
+): boolean {
+  const db = getDb();
+  const result = db.prepare(
+    `UPDATE research_shards
+     SET progress_positions = ?, progress_games = ?, last_heartbeat_at = unixepoch()
+     WHERE id = ? AND lease_id = ? AND status = 'running'`,
+  ).run(positions, games, shardId, leaseId);
+  return result.changes > 0;
+}
+
+export function completeResearchShardWithType(
+  shardId: string,
+  leaseId: string,
+  statsJson: string | null,
+  resultType: "full" | "partial" = "full",
+): ResearchShardRow | undefined {
+  const db = getDb();
+  const finish = db.transaction(() => {
+    const row = getResearchShardById(shardId);
+    if (!row || row.lease_id !== leaseId || row.status !== "running") {
+      return undefined;
+    }
+
+    db.prepare(
+      `UPDATE research_shards
+       SET status = 'completed',
+           stats_json = ?,
+           result_type = ?,
+           pending_command = NULL,
+           finished_at = unixepoch(),
+           last_heartbeat_at = unixepoch()
+       WHERE id = ? AND lease_id = ?`,
+    ).run(statsJson, resultType, shardId, leaseId);
+
+    return getResearchShardById(shardId);
+  });
+
+  return finish();
 }

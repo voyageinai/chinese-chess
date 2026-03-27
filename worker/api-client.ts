@@ -56,21 +56,21 @@ export class ApiClient {
     }
   }
 
-  async pollResearchTask(): Promise<ResearchTask | null> {
+  async pollResearchTask(): Promise<{ task: ResearchTask | null; draining?: boolean }> {
     try {
       const res = await this.request("/api/internal/research/poll", "POST", {
         workerId: this.workerId,
       });
-      if (res.status === 204) return null;
+      if (res.status === 204) return { task: null };
       if (!res.ok) {
         console.error(`[api] research poll failed: ${res.status} ${await res.text()}`);
-        return null;
+        return { task: null };
       }
       const data = await res.json();
-      return data.task ?? null;
+      return { task: data.task ?? null, draining: data.draining };
     } catch (err) {
       console.error("[api] research poll error:", err);
-      return null;
+      return { task: null };
     }
   }
 
@@ -139,17 +139,19 @@ export class ApiClient {
   async heartbeatResearch(
     shardId: string,
     report: ResearchHeartbeatRequest,
-  ): Promise<boolean> {
+  ): Promise<{ ok: boolean; command?: string }> {
     try {
       const res = await this.request(
         `/api/internal/research/${shardId}/heartbeat`,
         "POST",
         report,
       );
-      if (res.status === 409) return false;
-      return res.ok;
+      if (res.status === 409) return { ok: false };
+      if (!res.ok) return { ok: false };
+      const data = await res.json();
+      return { ok: true, command: data.command };
     } catch {
-      return false;
+      return { ok: false };
     }
   }
 

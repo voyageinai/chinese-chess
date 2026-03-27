@@ -9,6 +9,7 @@ const adminNav = [
   { href: "/admin/tournaments", label: "锦标赛" },
   { href: "/admin/invites", label: "邀请码" },
   { href: "/admin/workers", label: "集群" },
+  { href: "/admin/research", label: "研究任务" },
   { href: "/admin/audit-logs", label: "审计日志" },
 ];
 

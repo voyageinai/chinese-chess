@@ -322,6 +322,15 @@ def _balanced_worker(config: dict) -> dict:
                     policy_legal_to,
                     norm_black,
                 )
+
+            # Periodic progress report (every 10 games)
+            if game_count % 10 == 0:
+                total_pos = sum(counts.values())
+                elapsed = time.perf_counter() - t0
+                print(
+                    f"PROGRESS: positions={total_pos} games={game_count} elapsed={elapsed:.0f}",
+                    flush=True,
+                )
     finally:
         play_engine.close()
         analysis_engine.close()

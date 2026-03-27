@@ -26,6 +26,7 @@ export interface WorkerStats {
 export interface WorkerMonitoringInfo {
   id: string;
   status: "online" | "idle" | "offline";
+  draining: boolean;
   currentGames: string[];
   lastSeenAt: number;
   completedGames: number;
@@ -58,6 +59,7 @@ export interface DistributedMonitoringData {
 export class LeaseManager {
   private leases = new Map<string, Lease>(); // gameId → Lease
   private workerStats = new Map<string, WorkerStats>(); // workerId → stats
+  private drainedWorkers = new Set<string>(); // drained workerIds
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   start(): void {
@@ -161,6 +163,26 @@ export class LeaseManager {
     stats.currentPly.delete(gameId);
   }
 
+  // ── Drain ──────────────────────────────────────────────────────────
+
+  drainWorker(workerId: string): void {
+    this.drainedWorkers.add(workerId);
+    console.log(`[lease] Worker ${workerId} drained`);
+  }
+
+  undrainWorker(workerId: string): void {
+    this.drainedWorkers.delete(workerId);
+    console.log(`[lease] Worker ${workerId} undrained`);
+  }
+
+  isWorkerDrained(workerId: string): boolean {
+    return this.drainedWorkers.has(workerId);
+  }
+
+  getDrainedWorkers(): string[] {
+    return [...this.drainedWorkers];
+  }
+
   // ── Monitoring ──────────────────────────────────────────────────────
 
   /** Build monitoring data snapshot for the admin API. */
@@ -192,6 +214,7 @@ export class LeaseManager {
       workers.push({
         id: stats.workerId,
         status,
+        draining: this.drainedWorkers.has(stats.workerId),
         currentGames,
         lastSeenAt: stats.lastSeenAt,
         completedGames: stats.completedGames,

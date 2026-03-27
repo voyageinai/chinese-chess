@@ -30,5 +30,9 @@ export async function POST(
     return NextResponse.json({ ok: false, reason: "lease_expired" }, { status: 409 });
   }
 
-  return NextResponse.json({ ok: true, leaseExpiresAt: result.leaseExpiresAt });
+  const response: Record<string, unknown> = { ok: true, leaseExpiresAt: result.leaseExpiresAt };
+  if (result.command) {
+    response.command = result.command;
+  }
+  return NextResponse.json(response);
 }

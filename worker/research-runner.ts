@@ -11,6 +11,22 @@ function tail(text: string, maxChars = 2000): string {
   return text.slice(text.length - maxChars);
 }
 
+/** Parse the last PROGRESS line from stdout for real-time position/game counts. */
+function parseProgress(stdout: string): { positions: number; games: number } {
+  let positions = 0;
+  let games = 0;
+  const lines = stdout.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const match = lines[i].match(/PROGRESS:\s*positions=(\d+)\s+games=(\d+)/);
+    if (match) {
+      positions = parseInt(match[1], 10);
+      games = parseInt(match[2], 10);
+      break;
+    }
+  }
+  return { positions, games };
+}
+
 function buildCommand(
   task: ResearchTask,
   teacherPath: string,
@@ -92,6 +108,7 @@ export async function executeResearchTask(
   });
 
   let leaseValid = true;
+  let gracefulStop = false;
   let progress = 0;
   let stdout = "";
   let stderr = "";
@@ -105,15 +122,36 @@ export async function executeResearchTask(
 
   const heartbeatTimer = setInterval(async () => {
     progress += 1;
-    const ok = await apiClient.heartbeatResearch(task.shardId, {
+    const { positions, games } = parseProgress(stdout);
+    const result = await apiClient.heartbeatResearch(task.shardId, {
       leaseId: task.leaseId,
       workerId: config.workerId,
       progress,
+      positionsCollected: positions,
+      gamesPlayed: games,
     });
-    if (!ok) {
+
+    if (!result.ok) {
       leaseValid = false;
       child.kill("SIGTERM");
       clearInterval(heartbeatTimer);
+      return;
+    }
+
+    if (result.command === "stop") {
+      console.log(`[research] Received stop command for shard ${task.shardId}, graceful shutdown`);
+      gracefulStop = true;
+      child.kill("SIGTERM");
+      clearInterval(heartbeatTimer);
+      return;
+    }
+
+    if (result.command === "cancel") {
+      console.log(`[research] Received cancel command for shard ${task.shardId}, killing`);
+      leaseValid = false;
+      child.kill("SIGKILL");
+      clearInterval(heartbeatTimer);
+      return;
     }
   }, config.heartbeatIntervalMs);
 
@@ -122,6 +160,11 @@ export async function executeResearchTask(
       child.once("error", reject);
       child.once("close", (code, signal) => {
         if (code === 0) {
+          resolve();
+          return;
+        }
+        // Graceful stop via SIGTERM exits with non-zero but that's expected
+        if (gracefulStop && (signal === "SIGTERM" || code === null)) {
           resolve();
           return;
         }
@@ -179,6 +222,7 @@ export async function executeResearchTask(
   await apiClient.reportResearchResult(task.shardId, {
     leaseId: task.leaseId,
     status: "completed",
+    resultType: gracefulStop ? "partial" : "full",
     statsJson: JSON.stringify({
       bytes: data.length,
       stdoutTail: tail(stdout),

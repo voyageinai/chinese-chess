@@ -51,8 +51,11 @@ async function workerLoop(slot: number): Promise<void> {
     }
 
     if (activeResearch < maxConcurrentResearch) {
-      const researchTask = await apiClient.pollResearchTask();
-      if (researchTask) {
+      const { task: researchTask, draining } = await apiClient.pollResearchTask();
+      if (draining) {
+        console.log(`[worker:${slot}] Draining — not accepting new tasks`);
+        // Don't set shuttingDown; just skip this poll cycle
+      } else if (researchTask) {
         activeResearch++;
         console.log(
           `[worker:${slot}] Research ${researchTask.kind} shard ${researchTask.shardId} | positions=${researchTask.params.positions} (research ${activeResearch}/${maxConcurrentResearch})`,

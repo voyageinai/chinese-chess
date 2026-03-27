@@ -87,10 +87,28 @@ export function pollResearchTask(workerId: string): ResearchTask | null {
 export function heartbeatResearchTask(
   shardId: string,
   body: ResearchHeartbeatRequest,
-): { ok: boolean; leaseExpiresAt?: number } {
+): { ok: boolean; leaseExpiresAt?: number; command?: string } {
   const ok = queries.renewResearchShardLease(shardId, body.leaseId, body.workerId);
   if (!ok) return { ok: false };
-  return { ok: true, leaseExpiresAt: Date.now() + LEASE_TTL_MS };
+
+  // Persist richer progress if provided
+  if (body.positionsCollected != null || body.gamesPlayed != null) {
+    queries.updateShardProgress(
+      shardId,
+      body.leaseId,
+      body.positionsCollected ?? 0,
+      body.gamesPlayed ?? 0,
+    );
+  }
+
+  // Check for pending command
+  const shard = queries.getResearchShardById(shardId);
+  const command = shard?.pending_command ?? undefined;
+  if (command) {
+    queries.clearShardPendingCommand(shardId);
+  }
+
+  return { ok: true, leaseExpiresAt: Date.now() + LEASE_TTL_MS, command };
 }
 
 export function storeResearchArtifact(
@@ -134,10 +152,11 @@ export async function handleResearchResult(
     return failed ? { ok: true } : { ok: false, reason: "invalid_lease" };
   }
 
-  const shard = queries.completeResearchShard(
+  const shard = queries.completeResearchShardWithType(
     shardId,
     report.leaseId,
     report.statsJson ?? null,
+    report.resultType ?? "full",
   );
   if (!shard) {
     return { ok: false, reason: "invalid_lease" };

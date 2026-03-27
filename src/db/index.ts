@@ -253,6 +253,33 @@ function runMigrations(database: Database.Database): void {
   database.exec("CREATE INDEX IF NOT EXISTS idx_research_shards_job ON research_shards(job_id)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_research_shards_status ON research_shards(status)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_research_shards_worker ON research_shards(worker_id)");
+
+  // -- v11: Worker command infrastructure for research shards --
+  if (!hasColumn(database, "research_shards", "pending_command")) {
+    database.exec("ALTER TABLE research_shards ADD COLUMN pending_command TEXT");
+  }
+  if (!hasColumn(database, "research_shards", "progress_positions")) {
+    database.exec("ALTER TABLE research_shards ADD COLUMN progress_positions INTEGER DEFAULT 0");
+  }
+  if (!hasColumn(database, "research_shards", "progress_games")) {
+    database.exec("ALTER TABLE research_shards ADD COLUMN progress_games INTEGER DEFAULT 0");
+  }
+  if (!hasColumn(database, "research_shards", "result_type")) {
+    database.exec("ALTER TABLE research_shards ADD COLUMN result_type TEXT");
+  }
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS worker_commands (
+      id TEXT PRIMARY KEY,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      command TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      acknowledged_at INTEGER
+    )
+  `);
+  database.exec("CREATE INDEX IF NOT EXISTS idx_worker_commands_target ON worker_commands(target_type, target_id, status)");
 }
 
 function seedDefaultEngines(database: Database.Database): void {

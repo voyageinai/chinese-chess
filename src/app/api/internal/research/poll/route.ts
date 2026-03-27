@@ -23,7 +23,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "workerId required" }, { status: 400 });
   }
 
-  getLeaseManager().trackWorker(body.workerId);
+  const lm = getLeaseManager();
+  lm.trackWorker(body.workerId);
+
+  if (lm.isWorkerDrained(body.workerId)) {
+    return NextResponse.json({ task: null, draining: true });
+  }
 
   const task = pollResearchTask(body.workerId);
   if (!task) {
