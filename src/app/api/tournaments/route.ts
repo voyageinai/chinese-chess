@@ -37,28 +37,21 @@ export async function POST(request: Request) {
     const { name, timeBase, timeInc, rounds, format, engineIds, autoStart } =
       await request.json();
 
-    if (!name || timeBase == null || timeInc == null) {
-      return NextResponse.json(
-        { error: "Missing required fields: name, timeBase, timeInc" },
-        { status: 400 },
-      );
-    }
-
-    if (typeof name !== "string" || name.trim().length === 0) {
+    if (!name || (typeof name !== "string") || name.trim().length === 0) {
       return NextResponse.json(
         { error: "Tournament name must be a non-empty string" },
         { status: 400 },
       );
     }
 
-    if (typeof timeBase !== "number" || !Number.isFinite(timeBase) || timeBase <= 0) {
+    if (timeBase != null && (typeof timeBase !== "number" || !Number.isFinite(timeBase) || timeBase <= 0)) {
       return NextResponse.json(
         { error: "timeBase must be a positive number" },
         { status: 400 },
       );
     }
 
-    if (typeof timeInc !== "number" || !Number.isFinite(timeInc) || timeInc < 0) {
+    if (timeInc != null && (typeof timeInc !== "number" || !Number.isFinite(timeInc) || timeInc < 0)) {
       return NextResponse.json(
         { error: "timeInc must be a non-negative number" },
         { status: 400 },

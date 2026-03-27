@@ -156,8 +156,6 @@ export default function EnginesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: `${engineName} 定级赛`,
-          timeBase: 60,
-          timeInc: 1,
           rounds: 1,
           format: "gauntlet",
           engineIds,

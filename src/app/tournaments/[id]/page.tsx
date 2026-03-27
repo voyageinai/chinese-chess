@@ -413,8 +413,6 @@ export default function TournamentDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           engineIds,
-          timeBase: tournament.time_control_base,
-          timeInc: tournament.time_control_inc,
         }),
       });
       const data = await res.json();

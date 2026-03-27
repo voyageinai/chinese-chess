@@ -12,6 +12,7 @@ import { wsHub } from "@/server/ws";
 import { isAdmin } from "@/server/permissions";
 import { logAudit } from "@/server/audit";
 import { selectOpponents, randomColor } from "@/server/matchmaking";
+import { DEFAULT_TIME_BASE, DEFAULT_TIME_INC } from "@/lib/constants";
 
 function wireRunner(runner: TournamentRunner): void {
   runner.on("move", (msg) => wsHub.broadcast(msg));
@@ -59,8 +60,8 @@ async function handleMatchmaking(
   user: { id: string; role: string },
 ) {
   const { engineId, gameCount = 1, label } = body;
-  const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : 60;
-  const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : 1;
+  const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : DEFAULT_TIME_BASE;
+  const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : DEFAULT_TIME_INC;
   const isGauntlet = label === "定级赛" && Array.isArray(body.opponentIds) && body.opponentIds.length > 0;
 
   // Validate engine belongs to user
@@ -177,8 +178,8 @@ async function handleLegacyQuickMatch(
   user: { id: string; role: string },
 ) {
   const { engineIds } = body;
-  const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : 60;
-  const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : 1;
+  const resolvedTimeBase = typeof body.timeBase === "number" && body.timeBase > 0 ? body.timeBase : DEFAULT_TIME_BASE;
+  const resolvedTimeInc = typeof body.timeInc === "number" && body.timeInc >= 0 ? body.timeInc : DEFAULT_TIME_INC;
 
   if (engineIds.length < 2) {
     return NextResponse.json({ error: "至少选择 2 个引擎" }, { status: 400 });

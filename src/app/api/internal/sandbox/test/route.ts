@@ -11,6 +11,7 @@ import { TournamentRunner, registerRunner } from "@/server/tournament";
 import { wsHub } from "@/server/ws";
 import { SANDBOX_USER_ID } from "@/lib/service-users";
 import { verifyEngine } from "@/server/engine-validation";
+import { DEFAULT_TIME_BASE, DEFAULT_TIME_INC } from "@/lib/constants";
 
 export async function POST(request: Request) {
   if (!isDistributedEnabled()) {
@@ -24,8 +25,8 @@ export async function POST(request: Request) {
     const engineName = (formData.get("engineName") as string) || "sandbox-engine";
     const opponentIds = (formData.get("opponentIds") as string || "").split(",").filter(Boolean);
     const games = parseInt(formData.get("games") as string || "2", 10);
-    const timeBase = parseInt(formData.get("timeBase") as string || "60", 10);
-    const timeInc = parseInt(formData.get("timeInc") as string || "1", 10);
+    const timeBase = parseInt(formData.get("timeBase") as string || String(DEFAULT_TIME_BASE), 10);
+    const timeInc = parseInt(formData.get("timeInc") as string || String(DEFAULT_TIME_INC), 10);
 
     if (!engineFile) {
       return NextResponse.json({ error: "engine file required" }, { status: 400 });

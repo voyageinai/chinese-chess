@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { getDb } from "./index";
+import { DEFAULT_TIME_BASE, DEFAULT_TIME_INC } from "@/lib/constants";
 import type {
   User,
   Engine,
@@ -307,8 +308,8 @@ export function getLeaderboardWithDelta(): (Engine & { owner: string; elo_delta:
 export function createTournament(
   ownerId: string,
   name: string,
-  timeControlBase: number,
-  timeControlInc: number,
+  timeControlBase?: number,
+  timeControlInc?: number,
   rounds: number = 1,
   type: "tournament" | "quick_match" = "tournament",
   format: "round_robin" | "knockout" | "gauntlet" | "swiss" = "round_robin",
@@ -316,10 +317,12 @@ export function createTournament(
 ): Tournament {
   const db = getDb();
   const id = nanoid();
+  const base = timeControlBase ?? DEFAULT_TIME_BASE;
+  const inc = timeControlInc ?? DEFAULT_TIME_INC;
 
   db.prepare(
     "INSERT INTO tournaments (id, owner_id, name, time_control_base, time_control_inc, rounds, type, format, sandbox) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(id, ownerId, name, timeControlBase, timeControlInc, rounds, type, format, sandbox ? 1 : 0);
+  ).run(id, ownerId, name, base, inc, rounds, type, format, sandbox ? 1 : 0);
 
   return getTournamentById(id)!;
 }

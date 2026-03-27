@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Zap, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
+import { Zap, CheckCircle2 } from "lucide-react";
 
 interface Engine {
   id: string;
@@ -30,9 +30,6 @@ export function QuickMatchDialog({ open, onOpenChange }: QuickMatchDialogProps) 
   const [engines, setEngines] = useState<Engine[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [gameCount, setGameCount] = useState("1");
-  const [timeBase, setTimeBase] = useState("60");
-  const [timeInc, setTimeInc] = useState("1");
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -63,8 +60,6 @@ export function QuickMatchDialog({ open, onOpenChange }: QuickMatchDialogProps) 
         body: JSON.stringify({
           engineId: selectedId,
           gameCount: parseInt(gameCount, 10) || 1,
-          timeBase: parseInt(timeBase, 10),
-          timeInc: parseInt(timeInc, 10),
         }),
       });
 
@@ -169,46 +164,7 @@ export function QuickMatchDialog({ open, onOpenChange }: QuickMatchDialogProps) 
               </p>
             </div>
 
-            {/* Advanced settings */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className="flex items-center gap-1.5 text-sm text-ink-muted hover:text-ink transition-colors"
-              >
-                {showAdvanced ? (
-                  <ChevronUp className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-                高级设置
-              </button>
-
-              {showAdvanced && (
-                <div className="grid grid-cols-2 gap-3 mt-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="qm-timeBase">基础时间 (秒)</Label>
-                    <Input
-                      id="qm-timeBase"
-                      type="number"
-                      min="1"
-                      value={timeBase}
-                      onChange={(e) => setTimeBase(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="qm-timeInc">加秒 (秒)</Label>
-                    <Input
-                      id="qm-timeInc"
-                      type="number"
-                      min="0"
-                      value={timeInc}
-                      onChange={(e) => setTimeInc(e.target.value)}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
+            {/* Time control uses platform default (1+1s) */}
 
             {/* Error */}
             {error && (

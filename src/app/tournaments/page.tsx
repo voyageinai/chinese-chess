@@ -80,8 +80,6 @@ export default function TournamentsPage() {
   // Create form state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formName, setFormName] = useState("");
-  const [formTimeBase, setFormTimeBase] = useState("60");
-  const [formTimeInc, setFormTimeInc] = useState("1");
   const [formRounds, setFormRounds] = useState("1");
   const [formFormat, setFormFormat] = useState("round_robin");
   const [formError, setFormError] = useState("");
@@ -161,8 +159,6 @@ export default function TournamentsPage() {
         }
         const payload: Record<string, unknown> = {
           engineId: rankedEngineId,
-          timeBase: parseInt(formTimeBase, 10),
-          timeInc: parseInt(formTimeInc, 10),
           label: formFormat === "gauntlet" ? "定级赛" : "排位赛",
         };
         if (formFormat === "gauntlet") {
@@ -182,8 +178,6 @@ export default function TournamentsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: formName.trim(),
-            timeBase: parseInt(formTimeBase, 10),
-            timeInc: parseInt(formTimeInc, 10),
             rounds: parseInt(formRounds, 10) || 1,
             format: formFormat,
             engineIds: selectedIds.size > 0 ? [...selectedIds] : undefined,
@@ -251,30 +245,7 @@ export default function TournamentsPage() {
                     />
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="timeBase">基础时间 (秒)</Label>
-                    <Input
-                      id="timeBase"
-                      type="number"
-                      min="1"
-                      value={formTimeBase}
-                      onChange={(e) => setFormTimeBase(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="timeInc">加秒 (秒)</Label>
-                    <Input
-                      id="timeInc"
-                      type="number"
-                      min="0"
-                      value={formTimeInc}
-                      onChange={(e) => setFormTimeInc(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
+                {/* Time control uses platform default (1+1s) */}
                 <div className="space-y-1.5">
                   <Label>赛制</Label>
                   <div className="grid grid-cols-2 gap-2">
