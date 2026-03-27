@@ -138,11 +138,14 @@ export async function executeResearchTask(
       return;
     }
 
+    // Already stopping gracefully — keep heartbeats alive but skip commands
+    if (gracefulStop) return;
+
     if (result.command === "stop") {
       console.log(`[research] Received stop command for shard ${task.shardId}, graceful shutdown`);
       gracefulStop = true;
       child.kill("SIGTERM");
-      clearInterval(heartbeatTimer);
+      // Do NOT clearInterval — keep heartbeats to hold the lease while Python saves
       return;
     }
 
