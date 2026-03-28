@@ -87,14 +87,14 @@ export class EngineCache {
       writeFileSync(filePath, result.data);
     }
 
-    // Set executable permissions on all files
+    // Set executable permissions on all non-data files
+    const dataExtensions = new Set([".nnue", ".bin", ".txt", ".md", ".json", ".npz", ".gz"]);
     for (const file of readdirSync(engineDir)) {
       const filePath = path.join(engineDir, file);
       const stat = statSync(filePath);
       if (stat.isFile()) {
         const ext = path.extname(file).toLowerCase();
-        // Set executable for binaries (no extension), and scripts
-        if (!ext || ext === ".py" || ext === ".js") {
+        if (!dataExtensions.has(ext)) {
           chmodSync(filePath, 0o755);
         }
       }
